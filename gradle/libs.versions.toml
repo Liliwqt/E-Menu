@@ -15,7 +15,7 @@ coroutinesPlayServices = "1.10.2"
 hilt = "2.59.1"
 ksp = "2.3.9"
 kotlinxSerialization = "1.8.1"
-room = "2.7.1"
+room = "2.8.4"
 timber = "5.0.1"
 
 # Testing
