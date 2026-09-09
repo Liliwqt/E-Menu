@@ -42,7 +42,7 @@ fun KioskAuthorizationScreen(
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = message ?: "Ask a Firebase administrator to add this anonymous UID to the branch2 read/write allowlist.",
+                text = message ?: "Ask a Firebase administrator to authorize this kiosk for its assigned branch.",
                 color = theme.secondaryTextColor,
                 textAlign = TextAlign.Center
             )

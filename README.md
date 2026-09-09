@@ -6,12 +6,12 @@ E-Menu is an Android tablet ordering application for cafés, restaurants, cantee
 
 ## Overview
 
-This repository contains the **Android tablet kiosk / ordering application** for the broader E-Menu system. The tablet supports two practical usage modes:
+This repository contains the **Android tablet kiosk / ordering application** for the E-Menu system. The tablet supports two practical usage modes:
 
 - **Staff-assisted ordering:** staff carry the tablet and hand it to a customer for menu browsing and order entry.
 - **Table-side self-service:** the tablet remains at a table or ordering area for customers to place orders independently.
 
-Firebase synchronizes menu, inventory, settings, and order data with the broader E-Menu management platform. The separate web platform is used by authorized staff to process orders and access operational and AI-assisted analytics. Its source code and technology stack are not part of this repository.
+Firebase synchronizes menu, inventory, settings, and order data with the broader E-Menu management platform. The web management platform (E-Menu Portal) is now **merged into the same project** as this kiosk app — both share the same Firebase project, Realtime Database, and security rules. The web app's source lives in the sibling `AI-Operations-Management-Platform-main` directory and is deployed to Firebase Hosting; this repository focuses on the Android kiosk client.
 
 ## Features
 
@@ -61,13 +61,13 @@ Firebase Realtime Database
        +---- Orders
        |
        v
-External Web Management Platform
+E-Menu Portal (Web Management Platform)
        |
        v
 Admin / Host / Authorized Staff
 ```
 
-The Android kiosk communicates with Firebase directly. The external management platform is maintained separately and is not implemented in this repository.
+The Android kiosk communicates with Firebase directly. The web management platform (E-Menu Portal) is part of the same merged project — it shares the same Firebase project and Realtime Database, and is deployed separately to Firebase Hosting from the sibling `AI-Operations-Management-Platform-main` directory.
 
 ## Order Flow
 
@@ -127,7 +127,7 @@ Key implementation classes include `MainActivity`, `MenuScreen`, `MenuViewModel`
 2. Download `google-services.json` and place it at `app/google-services.json`.
 3. Enable **Anonymous** sign-in under Firebase Authentication.
 4. Create a Firebase Realtime Database.
-5. Review `database.rules.json`, replace the placeholder kiosk UIDs in the deployment copy, test the rules, and deploy them.
+5. Review the canonical database rules in the web management project, replace the placeholder kiosk UIDs in the deployment copy, test the rules, and deploy them from that project.
 6. Launch a newly installed kiosk and copy the anonymous UID shown on its registration screen.
 7. Add the UID to every required allowlist expression in the deployed rules, then select **Check registration** on the tablet.
 
@@ -143,6 +143,10 @@ branch2/
 └── logs/{orderId}
 ```
 
+Each kiosk order creates its immutable log and decrements tracked inventory in one Firebase update.
+It writes `inventoryProcessed: true` and `orderSource: android_kiosk`; the web dashboard observes
+that stock state and must never consume the order a second time.
+
 Authentication creates the kiosk identity; it does not authorize database access by itself. The UID must also be allowed by the deployed Realtime Database Rules.
 
 ## Kiosk Setup
@@ -153,9 +157,18 @@ Full kiosk enforcement requires Device Owner provisioning, normally on a factory
 adb shell dpm set-device-owner com.example.androidkiosk/.admin.KioskDeviceAdminReceiver
 ```
 
+> End-to-end setup (embedded-web first run, auto kiosk registration, building debug vs. provisioned
+> APKs, WebView provider requirements, troubleshooting): see
+> [`SETUP_GUIDE.md`](../AI-Operations-Management-Platform-main/SETUP_GUIDE.md) in the web project.
+
 Release builds block ordering when Device Owner or Lock Task enforcement is unavailable. Debug builds remain usable for development and display a provisioning warning.
 
 The default maintenance PIN is `1234`. Replace it before placing a tablet in public use.
+
+After a successful maintenance PIN, the app opens the configured web management panel. The panel
+uses its normal manager email/password login and remains signed in for the next maintenance session.
+Use `-PadminPanelUrl=https://staging.example.com` to override the release panel URL when building a
+staging APK.
 
 ## Local Cache and Connectivity
 
@@ -234,7 +247,7 @@ The bundled QR is static. **I've Paid** records `CUSTOMER_REPORTED_PAID`, not pa
 
 ## Documentation
 
-Detailed documentation covering system design, tablet deployment strategy, architecture, security, cloud synchronization, administrative workflows, and the wider E-Menu platform is maintained separately from this repository README.
+Detailed documentation covering system design, tablet deployment strategy, architecture, security, cloud synchronization, administrative workflows, and the wider E-Menu platform is maintained in the merged project. See [`SETUP_GUIDE.md`](../AI-Operations-Management-Platform-main/SETUP_GUIDE.md) and [`SETUP_BASIC.txt`](../AI-Operations-Management-Platform-main/SETUP_BASIC.txt) in the web project for end-to-end setup, and the web project's `README.md` for the management platform.
 
 ## Limitations
 

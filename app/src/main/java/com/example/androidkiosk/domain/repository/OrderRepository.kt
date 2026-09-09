@@ -4,6 +4,6 @@ import com.example.androidkiosk.model.Order
 
 /** Submits orders to Firebase and applies their inventory changes. */
 interface OrderRepository {
-    /** Idempotently submit [order] to `branch2/logs/{order.id}`. */
+    /** Idempotently submit [order] to the provisioned branch logs path. */
     suspend fun submitOrder(order: Order): Result<Unit>
 }

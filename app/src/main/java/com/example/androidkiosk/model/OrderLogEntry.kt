@@ -2,7 +2,7 @@ package com.example.androidkiosk.model
 
 import com.google.firebase.database.ServerValue
 
-/** Flattened representation of an order for Firebase logging at `branch2/logs/{orderId}`. */
+/** Flattened representation of an order for Firebase logging at the provisioned branch path. */
 data class OrderLogEntry(
     val orderId: String,
     val submittedByUid: String,
@@ -12,7 +12,11 @@ data class OrderLogEntry(
     val total: Double,
     val paymentMethod: String,
     val paymentStatus: String,
-    val timestamp: Any  // ServerValue.TIMESTAMP when writing
+    val timestamp: Any,  // ServerValue.TIMESTAMP when writing
+    /** Inventory is decremented atomically with this kiosk order, never by the web dashboard. */
+    val inventoryProcessed: Boolean,
+    val inventoryProcessedAt: Any,
+    val orderSource: String
 ) {
     /** Converts to a plain Map for Firebase `setValue()`. */
     fun toMap(): Map<String, Any?> = mapOf(
@@ -24,7 +28,10 @@ data class OrderLogEntry(
         "total" to total,
         "paymentMethod" to paymentMethod,
         "paymentStatus" to paymentStatus,
-        "timestamp" to timestamp
+        "timestamp" to timestamp,
+        "inventoryProcessed" to inventoryProcessed,
+        "inventoryProcessedAt" to inventoryProcessedAt,
+        "orderSource" to orderSource
     )
 
     companion object {
@@ -37,8 +44,13 @@ data class OrderLogEntry(
             total = order.total,
             paymentMethod = order.paymentMethod?.name ?: "UNKNOWN",
             paymentStatus = order.paymentStatus?.name ?: "UNKNOWN",
-            timestamp = ServerValue.TIMESTAMP
+            timestamp = ServerValue.TIMESTAMP,
+            inventoryProcessed = true,
+            inventoryProcessedAt = ServerValue.TIMESTAMP,
+            orderSource = ANDROID_KIOSK_SOURCE
         )
+
+        private const val ANDROID_KIOSK_SOURCE = "android_kiosk"
     }
 }
 

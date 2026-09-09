@@ -26,6 +26,10 @@ import com.example.androidkiosk.admin.KioskReleaseGate
 import com.example.androidkiosk.admin.PinManager
 import com.example.androidkiosk.admin.UnlockAttemptLogger
 import com.example.androidkiosk.admin.UnlockMethod
+import com.example.androidkiosk.BuildConfig
+import com.example.androidkiosk.data.repository.BranchPathProvider
+import com.example.androidkiosk.ui.admin.AdminPanelScreen
+import com.example.androidkiosk.ui.admin.KioskWebView
 import com.example.androidkiosk.ui.menu.MenuScreen
 import com.example.androidkiosk.ui.menu.MenuViewModel
 import com.example.androidkiosk.ui.menu.components.KioskProvisioningRequiredScreen
@@ -35,12 +39,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import timber.log.Timber
 import javax.inject.Inject
 
+/** Which full-screen surface the kiosk app is currently showing. */
+private enum class KioskSurface {
+    /** Embedded web app (registration → setup → dashboard) for unprovisioned devices. */
+    SETUP_WEB,
+
+    /** Native locked kiosk menu. */
+    KIOSK_MENU,
+
+    /** PIN-unlocked dashboard (embedded web app, admin mode). */
+    ADMIN_WEB
+}
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var kioskManager: KioskManager
     @Inject lateinit var pinManager: PinManager
     @Inject lateinit var unlockAttemptLogger: UnlockAttemptLogger
+    @Inject lateinit var branchPathProvider: BranchPathProvider
 
     /** Whether the admin PIN dialog should be shown. */
     private val showPinDialog = MutableStateFlow(false)
@@ -48,6 +65,14 @@ class MainActivity : ComponentActivity() {
     /** Whether the device is currently unlocked by admin. */
     private val isAdminUnlocked = MutableStateFlow(false)
     private val unlockMethod = MutableStateFlow(UnlockMethod.VOLUME_BUTTON)
+
+    /**
+     * Current surface: setup web by default, native kiosk menu if already provisioned.
+     * NOTE: this cannot read [branchPathProvider] in a field initializer — Hilt injects
+     * the field in onCreate() (after construction), so a field initializer would hit an
+     * uninitialized lateinit var and crash the app on launch. Initialized in onCreate().
+     */
+    private val surface = MutableStateFlow(KioskSurface.SETUP_WEB)
 
     // Volume Up long-press detection via Handler
     private val handler = Handler(Looper.getMainLooper())
@@ -62,6 +87,22 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Hilt has now injected all @Inject fields. Decide the initial surface:
+        // an already-provisioned device boots straight into the locked kiosk menu;
+        // a fresh device starts in the embedded web app (registration → setup).
+        surface.value = if (branchPathProvider.isConfigured) {
+            KioskSurface.KIOSK_MENU
+        } else {
+            KioskSurface.SETUP_WEB
+        }
+        Timber.i(
+            "Surface decision — isConfigured=%s company=%s branch=%s → %s",
+            branchPathProvider.isConfigured,
+            branchPathProvider.companyId,
+            branchPathProvider.branchId,
+            surface.value.name
+        )
+
         // Window configuration
         window.attributes = window.attributes.apply {
             layoutInDisplayCutoutMode =
@@ -71,25 +112,27 @@ class MainActivity : ComponentActivity() {
         hideSystemBars()
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        // NOTE: FLAG_SECURE was intentionally removed so the app can be
+        // screenshotted/recorded during development and support debugging.
+        // (Re-enable for a hardened production kiosk if screen privacy is required.)
 
-        // Block back gesture/button in kiosk mode using the modern OnBackPressedDispatcher.
-        // The callback is always enabled; it selectively allows back only when admin-unlocked.
+        // Block back in kiosk mode. The admin panel WebView consumes Back first
+        // (via its BackHandler) so we only act when back reaches us.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (isAdminUnlocked.value) {
-                    // Temporarily disable so the dispatcher can propagate normally
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
-                    isEnabled = true
+                if (surface.value == KioskSurface.ADMIN_WEB) {
+                    returnToKiosk()
                 } else {
                     Timber.d("Back gesture blocked — kiosk mode active")
                 }
             }
         })
 
-        // Enable kiosk mode (Device Owner)
-        kioskManager.enableKioskMode(this)
+        // Enable kiosk mode (Device Owner) unless we are on the first-run setup web
+        // (the setup web must stay interactive for registration/setup before locking).
+        if (surface.value != KioskSurface.SETUP_WEB) {
+            kioskManager.enableKioskMode(this)
+        }
         kioskManager.applyUserRestrictions()
 
         Timber.i(
@@ -104,6 +147,7 @@ class MainActivity : ComponentActivity() {
             val adminUnlocked by isAdminUnlocked.collectAsState()
             val currentUnlockMethod by unlockMethod.collectAsState()
             val kioskStatus by kioskManager.enforcementStatus.collectAsState()
+            val currentSurface by surface.collectAsState()
             val isDebuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
             val releaseKioskBlocked = KioskReleaseGate.isOrderingBlocked(
                 isDebuggable = isDebuggable,
@@ -123,41 +167,52 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (releaseKioskBlocked) {
-                        KioskProvisioningRequiredScreen(kioskStatus.name)
-                    } else MenuScreen(
-                        viewModel = viewModel,
-                        showPinDialog = showPin,
-                        isAdminUnlocked = adminUnlocked,
-                        unlockMethod = currentUnlockMethod,
-                        pinManager = pinManager,
-                        onPinDialogDismiss = {
-                            showPinDialog.value = false
-                        },
-                        onUnlockSuccess = { method ->
-                            unlockAttemptLogger.logAttempt(method, success = true)
-                            showPinDialog.value = false
-                            isAdminUnlocked.value = true
-                            kioskManager.disableKioskMode(this@MainActivity)
-                            kioskManager.removeUserRestrictions()
-                            kioskManager.clearHomeApp()
-                            Timber.i("Admin unlocked device via %s", method.name)
-                        },
-                        onRelockRequest = {
-                            isAdminUnlocked.value = false
-                            kioskManager.relockKioskMode(this@MainActivity)
-                            kioskManager.applyUserRestrictions()
-                            hideSystemBars()
-                            Timber.i("Device re-locked by admin")
-                        },
-                        onPinDialogRequest = { method ->
-                            unlockMethod.value = method
-                            showPinDialog.value = true
-                        },
-                        onPinFailed = { method ->
-                            unlockAttemptLogger.logAttempt(method, success = false)
+                    when (currentSurface) {
+                        KioskSurface.SETUP_WEB -> KioskWebView(
+                            url = BuildConfig.ADMIN_PANEL_URL,
+                            injectBridge = true,
+                            onEnterKioskMode = { companyId, branchId -> enterKioskFromWeb(companyId, branchId) }
+                        )
+                        KioskSurface.ADMIN_WEB -> AdminPanelScreen(
+                            panelUrl = BuildConfig.ADMIN_PANEL_URL,
+                            onReturnToKiosk = ::returnToKiosk,
+                            onEnterKioskMode = { companyId, branchId -> enterKioskFromWeb(companyId, branchId) }
+                        )
+                        else -> {
+                            if (releaseKioskBlocked) {
+                                KioskProvisioningRequiredScreen(kioskStatus.name)
+                            } else MenuScreen(
+                                viewModel = viewModel,
+                                showPinDialog = showPin,
+                                isAdminUnlocked = adminUnlocked,
+                                unlockMethod = currentUnlockMethod,
+                                pinManager = pinManager,
+                                onPinDialogDismiss = {
+                                    showPinDialog.value = false
+                                },
+                                onUnlockSuccess = { method ->
+                                    unlockAttemptLogger.logAttempt(method, success = true)
+                                    showPinDialog.value = false
+                                    isAdminUnlocked.value = true
+                                    kioskManager.disableKioskMode(this@MainActivity)
+                                    kioskManager.removeUserRestrictions()
+                                    kioskManager.clearHomeApp()
+                                    surface.value = KioskSurface.ADMIN_WEB
+                                    Timber.i("Admin unlocked device via %s", method.name)
+                                },
+                                onRelockRequest = {
+                                    returnToKiosk()
+                                },
+                                onPinDialogRequest = { method ->
+                                    unlockMethod.value = method
+                                    showPinDialog.value = true
+                                },
+                                onPinFailed = { method ->
+                                    unlockAttemptLogger.logAttempt(method, success = false)
+                                }
+                            )
                         }
-                    )
+                    }
                 }
             }
         }
@@ -165,8 +220,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-enforce kiosk mode if it was somehow exited (defense-in-depth)
-        if (!isAdminUnlocked.value) {
+        // Re-enforce kiosk mode if it was somehow exited (defense-in-depth).
+        if (!isAdminUnlocked.value && surface.value != KioskSurface.SETUP_WEB) {
             hideSystemBars()
             // Re-enter lock task if not currently in it
             if (kioskManager.isDeviceOwner) {
@@ -229,6 +284,31 @@ class MainActivity : ComponentActivity() {
         windowInsetsController.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         windowInsetsController.hide(WindowInsetsCompat.Type.systemBars())
+    }
+
+    /** Called from the embedded web app (setup shell or admin panel) to lock into the kiosk menu. */
+    private fun enterKioskFromWeb(companyId: String, branchId: String) {
+        // Provision the native menu to the branch the web workspace selected.
+        if (companyId.isNotBlank() && branchId.isNotBlank()) {
+            runCatching { branchPathProvider.configure(companyId, branchId) }
+                .onFailure { Timber.w(it, "Failed to provision branch path from web kiosk request") }
+        }
+        surface.value = KioskSurface.KIOSK_MENU
+        isAdminUnlocked.value = false
+        kioskManager.enableKioskMode(this)
+        kioskManager.applyUserRestrictions()
+        hideSystemBars()
+        Timber.i("Entered kiosk menu from web (company=%s branch=%s)", companyId, branchId)
+    }
+
+    /** Return from the admin panel to the native kiosk menu and re-lock the device. */
+    private fun returnToKiosk() {
+        surface.value = KioskSurface.KIOSK_MENU
+        isAdminUnlocked.value = false
+        kioskManager.relockKioskMode(this)
+        kioskManager.applyUserRestrictions()
+        hideSystemBars()
+        Timber.i("Admin panel closed and device re-locked")
     }
 
     // ─── Accessibility: Reduced Motion Preference ───────────────────────

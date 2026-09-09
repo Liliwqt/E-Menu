@@ -12,6 +12,9 @@ captures/
 .idea/
 *.iml
 
+# VS Code
+.vscode/
+
 # Local coding-agent metadata
 .agents/
 .codex/

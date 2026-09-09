@@ -14,6 +14,18 @@ val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) load(keystorePropertiesFile.inputStream())
 }
+val adminPanelUrl = providers.gradleProperty("adminPanelUrl")
+    .orElse("https://touch-menu-web.online")
+    .get()
+// Provisioning IDs come from gradle properties ONLY for release provisioning.
+// For debug builds they must stay blank so a fresh install boots into the
+// registration/setup web app (SETUP_WEB) instead of the locked kiosk menu.
+val defaultCompanyId = providers.gradleProperty("companyId")
+    .orElse("")
+    .get()
+val defaultBranchId = providers.gradleProperty("branchId")
+    .orElse("")
+    .get()
 
 android {
     namespace = "com.example.androidkiosk"
@@ -27,6 +39,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "ADMIN_PANEL_URL", "\"$adminPanelUrl\"")
+        buildConfigField("String", "DEFAULT_COMPANY_ID", "\"$defaultCompanyId\"")
+        buildConfigField("String", "DEFAULT_BRANCH_ID", "\"$defaultBranchId\"")
 
     }
     val hasReleaseSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
@@ -61,6 +76,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -88,6 +104,10 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.database)
     implementation(libs.firebase.auth)
+    implementation(libs.google.id.token)
+    implementation(libs.credentials)
+    implementation(libs.credentials.play.services.auth)
+    implementation(libs.googleid)
 
     // Coroutines Play Services (for Firebase tasks)
     implementation(libs.kotlinx.coroutines.play.services)

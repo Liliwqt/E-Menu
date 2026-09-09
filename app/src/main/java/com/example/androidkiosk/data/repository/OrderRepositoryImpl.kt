@@ -18,7 +18,8 @@ import javax.inject.Singleton
 @Singleton
 class OrderRepositoryImpl @Inject constructor(
     private val database: FirebaseDatabase,
-    private val authManager: AuthManager
+    private val authManager: AuthManager,
+    private val branchPathProvider: BranchPathProvider
 ) : OrderRepository {
 
     override suspend fun submitOrder(order: Order): Result<Unit> {
@@ -32,7 +33,7 @@ class OrderRepositoryImpl @Inject constructor(
             requireNotNull(order.paymentMethod) { "Payment method is required" }
             requireNotNull(order.paymentStatus) { "Payment status is required" }
 
-            val orderRef = database.getReference("branch2/logs/${order.id}")
+            val orderRef = database.getReference("${branchPathProvider.branchPath}/logs/${order.id}")
             if (orderRef.get().await().exists()) {
                 Timber.i("Order %s was already submitted", order.orderNumber)
                 return Result.success(Unit)
@@ -42,12 +43,12 @@ class OrderRepositoryImpl @Inject constructor(
             val entry = OrderLogEntry.fromOrder(order, userId)
             val updates = mutableMapOf<String, Any>()
 
-            updates["branch2/logs/${order.id}"] = entry.toMap()
+            updates["${branchPathProvider.branchPath}/logs/${order.id}"] = entry.toMap()
 
             // Re-read stock immediately before submission. Missing item records are legacy/untracked;
             // existing item records must contain the selected size and have enough stock.
             val inventory = FirebaseMenuMapper.parseInventory(
-                database.getReference(INVENTORY_PATH).get().await().value
+                database.getReference("${branchPathProvider.branchPath}/inventory").get().await().value
             )
             val quantitiesByStockPath = order.items.groupingBy { item ->
                 val size = item.selectedSize.ifEmpty { DEFAULT_STOCK_SIZE }
@@ -62,7 +63,7 @@ class OrderRepositoryImpl @Inject constructor(
                     "Selected size is not tracked in inventory"
                 }
                 require(currentStock >= quantity) { "Insufficient inventory stock" }
-                updates["$INVENTORY_PATH/${parts[0]}/${parts[1]}/sizes/${parts[2]}/stock"] =
+                updates["${branchPathProvider.branchPath}/inventory/${parts[0]}/${parts[1]}/sizes/${parts[2]}/stock"] =
                     ServerValue.increment(-quantity.toLong())
             }
 
@@ -130,8 +131,5 @@ class OrderRepositoryImpl @Inject constructor(
     private fun String.isFirebasePathSegment(): Boolean =
         isNotBlank() && none { it == '.' || it == '#' || it == '$' || it == '[' || it == ']' || it == '/' }
 
-    private companion object {
-        const val INVENTORY_PATH = "branch2/inventory"
-        const val DEFAULT_STOCK_SIZE = "Medium"
-    }
+    private companion object { const val DEFAULT_STOCK_SIZE = "Medium" }
 }

@@ -31,7 +31,8 @@ class MenuRepositoryImpl @Inject constructor(
     private val database: FirebaseDatabase,
     private val menuItemDao: MenuItemDao,
     private val externalScope: CoroutineScope,
-    private val authManager: AuthManager
+    private val authManager: AuthManager,
+    private val branchPathProvider: BranchPathProvider
 ) : MenuRepository {
 
     private val firebaseSyncStarted = AtomicBoolean(false)
@@ -64,7 +65,7 @@ class MenuRepositoryImpl @Inject constructor(
         }
 
     private fun observeAuthorizedInventory(): Flow<Map<String, Map<String, Int>>> = callbackFlow {
-        val inventoryRef = database.getReference(INVENTORY_PATH)
+        val inventoryRef = database.getReference("${branchPathProvider.branchPath}/inventory")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 trySend(FirebaseMenuMapper.parseInventory(snapshot.value))
@@ -81,7 +82,7 @@ class MenuRepositoryImpl @Inject constructor(
 
     override suspend fun refresh() {
         check(authManager.authorizationState.value.isAuthorized) { "Kiosk UID is not registered" }
-        val snapshot = database.getReference(CATEGORIES_PATH).get().await()
+        val snapshot = database.getReference("${branchPathProvider.branchPath}/categories").get().await()
         replaceCacheFrom(snapshot)
         ensureFirebaseSync()
     }
@@ -114,7 +115,7 @@ class MenuRepositoryImpl @Inject constructor(
     @Synchronized
     private fun attachFirebaseListener() {
         if (categoriesListener != null) return
-        val reference = database.getReference(CATEGORIES_PATH)
+        val reference = database.getReference("${branchPathProvider.branchPath}/categories")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 externalScope.launch {
@@ -159,8 +160,4 @@ class MenuRepositoryImpl @Inject constructor(
         Timber.d("Synced %d menu items to local cache", entities.size)
     }
 
-    private companion object {
-        const val CATEGORIES_PATH = "branch2/categories"
-        const val INVENTORY_PATH = "branch2/inventory"
-    }
 }

@@ -6,6 +6,7 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
+import com.example.androidkiosk.data.repository.BranchPathProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,7 +39,8 @@ data class KioskAuthorizationState(
 @Singleton
 class AuthManager @Inject constructor(
     private val firebaseAuth: FirebaseAuth,
-    private val database: FirebaseDatabase
+    private val database: FirebaseDatabase,
+    private val branchPathProvider: BranchPathProvider
 ) {
     private val _authorizationState = MutableStateFlow(KioskAuthorizationState())
     val authorizationState: StateFlow<KioskAuthorizationState> = _authorizationState.asStateFlow()
@@ -57,6 +59,7 @@ class AuthManager @Inject constructor(
     /** Sign in anonymously. Safe to call repeatedly. */
     suspend fun ensureSignedIn() {
         if (firebaseAuth.currentUser != null) {
+            loadEnrollment(firebaseAuth.currentUser!!.uid)
             probeAuthorization(firebaseAuth.currentUser!!.uid)
             return
         }
@@ -64,6 +67,10 @@ class AuthManager @Inject constructor(
         _authorizationState.value = KioskAuthorizationState()
         try {
             firebaseAuth.signInAnonymously().await()
+            firebaseAuth.currentUser?.uid?.let { uid ->
+                loadEnrollment(uid)
+                probeAuthorization(uid)
+            }
         } catch (error: Exception) {
             _authorizationState.value = KioskAuthorizationState(
                 status = KioskRegistrationStatus.ERROR,
@@ -77,7 +84,24 @@ class AuthManager @Inject constructor(
     suspend fun refreshAuthorization() {
         ensureSignedIn()
         val user = firebaseAuth.currentUser ?: return
+        loadEnrollment(user.uid)
         probeAuthorization(user.uid)
+    }
+
+    private suspend fun loadEnrollment(uid: String) {
+        if (branchPathProvider.isConfigured) return
+        try {
+            val enrollment = database.getReference("kioskEnrollments/$uid").get().await()
+            if (enrollment.child("isActive").getValue(Boolean::class.java) == true) {
+                val companyId = enrollment.child("companyId").getValue(String::class.java).orEmpty()
+                val branchId = enrollment.child("branchId").getValue(String::class.java).orEmpty()
+                if (companyId.isNotBlank() && branchId.isNotBlank()) {
+                    branchPathProvider.configure(companyId, branchId)
+                }
+            }
+        } catch (error: Exception) {
+            Timber.w(error, "Kiosk enrollment lookup failed")
+        }
     }
 
     private fun observeRegistration(user: FirebaseUser?) {
@@ -94,7 +118,15 @@ class AuthManager @Inject constructor(
             uid = uid,
             status = KioskRegistrationStatus.AUTHENTICATING
         )
-        val reference = database.getReference(AUTHORIZATION_PROBE_PATH)
+        if (!branchPathProvider.isConfigured) {
+            _authorizationState.value = KioskAuthorizationState(
+                uid = uid,
+                status = KioskRegistrationStatus.PENDING_REGISTRATION,
+                errorMessage = "This kiosk has not been assigned to a company branch yet."
+            )
+            return
+        }
+        val reference = database.getReference("${branchPathProvider.branchPath}/appSettings")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 _authorizationState.value = KioskAuthorizationState(
@@ -132,7 +164,4 @@ class AuthManager @Inject constructor(
         }
     }
 
-    private companion object {
-        const val AUTHORIZATION_PROBE_PATH = "branch2/appSettings"
-    }
 }

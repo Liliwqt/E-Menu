@@ -3,6 +3,8 @@ package com.example.androidkiosk.di
 import android.app.Application
 import android.app.admin.DevicePolicyManager
 import android.content.pm.ApplicationInfo
+import android.webkit.WebView
+import com.example.androidkiosk.BuildConfig
 import com.example.androidkiosk.admin.AuthManager
 import com.example.androidkiosk.admin.KioskDeviceAdminReceiver
 import com.google.firebase.database.FirebaseDatabase
@@ -25,6 +27,8 @@ class MenuApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Keep remote WebView debugging disabled in release builds.
+        WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
             Timber.plant(Timber.DebugTree())
         }

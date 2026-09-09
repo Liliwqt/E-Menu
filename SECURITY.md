@@ -9,8 +9,8 @@ Please use GitHub's private vulnerability reporting for security issues. Do not 
 ### Firebase
 
 - Enable Anonymous Authentication and approve each kiosk UID explicitly.
-- Deploy reviewed Realtime Database Rules before installing a release build.
-- Do not grant read or write access at the `branch2` root. Parent permissions override stricter child rules.
+- Deploy reviewed Realtime Database Rules from the web management project before installing a release build; it is the canonical production rule source.
+- Keep kiosk permissions scoped to menu/settings/inventory reads, stock decreases, and immutable self-owned orders. Manager permissions are defined separately in the canonical web policy.
 - Keep menu and application settings read-only for kiosk clients.
 - Permit stock values to decrease only and reject negative or nonnumeric values.
 - Keep orders immutable after creation and limit each kiosk to its own order records.

@@ -20,7 +20,8 @@ import javax.inject.Singleton
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class AppSettingsRepositoryImpl @Inject constructor(
     private val database: FirebaseDatabase,
-    private val authManager: AuthManager
+    private val authManager: AuthManager,
+    private val branchPathProvider: BranchPathProvider
 ) : AppSettingsRepository {
 
     override fun observeAppSettings(): Flow<AppSettings> =
@@ -29,7 +30,7 @@ class AppSettingsRepositoryImpl @Inject constructor(
         }
 
     private fun observeAuthorizedSettings(): Flow<AppSettings> = callbackFlow {
-        val settingsRef = database.getReference("branch2/appSettings")
+        val settingsRef = database.getReference("${branchPathProvider.branchPath}/appSettings")
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
