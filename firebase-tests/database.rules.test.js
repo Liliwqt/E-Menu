@@ -638,3 +638,21 @@ test("a branch manager can take staff off the roster but not the owner", async (
   await assertFails(remove(ref(manager, `${branchPath}/users/${managerUid}`)));
   await assertFails(remove(ref(manager, `${companyId}/users/${managerUid}`)));
 });
+
+test("the rules mirrored into the kiosk repo match the ones actually deployed", () => {
+  // The kiosk project keeps a copy of the policy at its root so it documents the
+  // rules it runs under. That copy is what drift made dangerous: it sat for two
+  // weeks carrying a policy where any signed-in account could write itself onto
+  // any branch as a manager, while the deployed rules had outgrown it. Nothing
+  // referenced it, so nothing caught it.
+  //
+  // It is checked rather than trusted, and it is compared byte for byte because
+  // the file is deployed verbatim - a reformat would still be the same policy,
+  // but it would also be an unexplained diff in a security file.
+  const mirror = fs.readFileSync(path.resolve("../database.rules.json"), "utf8");
+  assert.equal(
+    mirror,
+    rules,
+    "MenuApplication VsCode /database.rules.json no longer matches the deployed policy"
+  );
+});
