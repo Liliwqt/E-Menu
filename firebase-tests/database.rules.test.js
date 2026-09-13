@@ -22,6 +22,11 @@ const branchId = "branch-sugar-cafe-nivel-hills";
 const otherBranchId = "branch-sugar-cafe-it-park";
 const managerUid = "company-manager";
 const companyKioskUid = "company-kiosk";
+// Role-gating fixtures. `managerUid` above is the COMPANY owner (it sits in
+// ownerUids). These two are the delegated roles underneath them.
+const branchManagerUid = "branch-manager";
+const staffUid = "branch-staff";
+const outsiderUid = "outside-company-user";
 let testEnv;
 
 before(async () => {
@@ -54,6 +59,20 @@ beforeEach(async () => {
             companyRole: "owner",
             branchIds: { [branchId]: true },
           },
+          [branchManagerUid]: {
+            uid: branchManagerUid,
+            email: "bm@example.com",
+            companyId,
+            companyRole: "manager",
+            branchIds: { [branchId]: true },
+          },
+          [staffUid]: {
+            uid: staffUid,
+            email: "staff@example.com",
+            companyId,
+            companyRole: "staff",
+            branchIds: { [branchId]: true },
+          },
         },
         branches: {
           [branchId]: {
@@ -62,14 +81,23 @@ beforeEach(async () => {
               branchName: "Nivel Hills",
               companyId,
               ownerUid: managerUid,
+              // Structurally one manager per branch: the manager role is derived
+              // from this pointer, not from the membership row alone.
+              managerUid: branchManagerUid,
               plan: "free",
             },
             users: {
               [managerUid]: { uid: managerUid, role: "owner" },
+              [branchManagerUid]: { uid: branchManagerUid, role: "manager" },
+              [staffUid]: { uid: staffUid, role: "staff" },
             },
             kiosks: {},
             categories: { Drinks: { coffee: { name: "Coffee", price: 100 } } },
             inventory: { Drinks: { coffee: { sizes: { Medium: { stock: 5 } } } } },
+            analytics: { summary: { totalOrders: 1, totalRevenue: 100 } },
+            deletedLogs: { "123E4567": { orderNumber: "123E4567", total: 100 } },
+            inventoryHistory: { coffee: { "-N1": { type: "increase", quantity: 1 } } },
+            menuLogs: { "-N1": { email: "manager@example.com", action: "Added item", timestamp: 1 } },
             logs: {},
           },
           [otherBranchId]: {
@@ -315,4 +343,298 @@ test("retry after partial company works", async () => {
     ownerUid: "new-owner",
     plan: "free",
   }));
+});
+
+// ===== Delegated roles: owner / branch manager / staff =====
+//
+// These fixtures mirror how the portal writes: staff restock and toggle
+// availability, managers additionally edit the menu and correct the books, and
+// the company owner keeps branch + billing control.
+
+const branchPath = `${companyId}/branches/${branchId}`;
+
+test("staff can append inventory history, which is written on every restock", async () => {
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+
+  // adjustStock() updates stock and then appends a history entry. If this write
+  // is denied the stock correction lands half-applied and throws to the caller.
+  await assertSucceeds(set(ref(staff, `${branchPath}/inventoryHistory/coffee/-N2`), {
+    type: "increase",
+    quantity: 2,
+    userId: staffUid,
+  }));
+  await assertSucceeds(set(ref(manager, `${branchPath}/inventoryHistory/coffee/-N3`), {
+    type: "decrease",
+    quantity: 1,
+    userId: branchManagerUid,
+  }));
+  await assertSucceeds(get(ref(staff, `${branchPath}/inventoryHistory/coffee`)));
+});
+
+test("only managers and owners may write the menu audit trail", async () => {
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const owner = testEnv.authenticatedContext(managerUid).database();
+
+  // addMenuLog() rides along with every menu edit, so it must succeed for the
+  // two roles that can edit the menu and fail for the one that cannot.
+  await assertSucceeds(set(ref(manager, `${branchPath}/menuLogs/-M1`), {
+    email: "bm@example.com",
+    action: "Added item",
+    timestamp: 2,
+  }));
+  await assertSucceeds(set(ref(owner, `${branchPath}/menuLogs/-M2`), {
+    email: "manager@example.com",
+    action: "Edited item",
+    timestamp: 3,
+  }));
+  await assertFails(set(ref(staff, `${branchPath}/menuLogs/-M3`), {
+    email: "staff@example.com",
+    action: "Added item",
+    timestamp: 4,
+  }));
+});
+
+test("staff can read the trash bin but not write it; only the owner can empty it", async () => {
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const owner = testEnv.authenticatedContext(managerUid).database();
+
+  // Every member's BranchDataContext subscribes to deletedLogs, so reads stay open.
+  await assertSucceeds(get(ref(staff, `${branchPath}/deletedLogs`)));
+
+  // Discarding an order is a manager action; wiping the bin outright is not.
+  await assertSucceeds(set(ref(manager, `${branchPath}/deletedLogs/ORDER-BM`), {
+    orderNumber: "ORDER-BM",
+    total: 50,
+  }));
+  await assertFails(set(ref(staff, `${branchPath}/deletedLogs/ORDER-ST`), {
+    orderNumber: "ORDER-ST",
+    total: 50,
+  }));
+  await assertSucceeds(remove(ref(owner, `${branchPath}/deletedLogs`)));
+  await assertFails(remove(ref(manager, `${branchPath}/deletedLogs`)));
+  await assertFails(remove(ref(staff, `${branchPath}/deletedLogs`)));
+});
+
+test("order processing can write analytics from any member's session", async () => {
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const outsider = testEnv.authenticatedContext(outsiderUid).database();
+
+  // useAnalyticsProcessor() runs inside BranchDataContext, so whoever is signed
+  // in processes new orders. Restricting this to managers would strand orders
+  // placed on a staff-only shift, so every member may write.
+  await assertSucceeds(set(ref(staff, `${branchPath}/analytics/processedOrders/o-1`), {
+    orderId: "o-1",
+    total: 10,
+  }));
+  await assertSucceeds(set(ref(manager, `${branchPath}/analytics/processedOrders/o-2`), {
+    orderId: "o-2",
+    total: 20,
+  }));
+
+  await assertFails(set(ref(outsider, `${branchPath}/analytics/processedOrders/o-3`), {
+    orderId: "o-3",
+    total: 30,
+  }));
+  await assertFails(get(ref(outsider, `${branchPath}/analytics`)));
+});
+
+test("the order ledger is closed to branch managers and staff", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const id = "123e4567-e89b-12d3-a456-426614174010";
+  const logsPath = `${branchPath}/logs`;
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), `${logsPath}/${id}`), validOrder(companyKioskUid, id));
+  });
+
+  // Running the branch does not include rewriting its takings. OrdersPage hides
+  // the trash action for kiosk orders and HistoryPage sends them to a read-only
+  // view; these assertions keep the rules behind those screens.
+  await assertFails(update(ref(manager, `${logsPath}/${id}`), { total: 1 }));
+  await assertFails(update(ref(staff, `${logsPath}/${id}`), { total: 1 }));
+  await assertFails(remove(ref(manager, `${logsPath}/${id}`)));
+  await assertFails(remove(ref(staff, `${logsPath}/${id}`)));
+
+  // Reading it back is what the dashboards do, so that stays open.
+  await assertSucceeds(get(ref(manager, `${logsPath}/${id}`)));
+  await assertSucceeds(get(ref(staff, `${logsPath}/${id}`)));
+});
+
+test("an order's recorded fields cannot be rewritten in place, even by the owner", async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const id = "123e4567-e89b-12d3-a456-426614174011";
+  const logsPath = `${branchPath}/logs`;
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), `${logsPath}/${id}`), validOrder(companyKioskUid, id));
+  });
+
+  // Branch rules cascade downward, so the ownerUids grant on $branchId reaches
+  // /logs and an owner can hard-delete an order outright. Without a Cloud
+  // Function the tenant's own owner is trusted with their data, so that is
+  // accepted rather than closed — but it is asserted here so the choice is
+  // visible, and revisited deliberately if that grant is ever narrowed.
+  await assertSucceeds(remove(ref(owner, `${logsPath}/${id}`)));
+
+  // Rewriting is a different matter and stays shut: submittedByUid is pinned to
+  // the kiosk that placed the order, and any key the shape does not declare is
+  // rejected, so tampering with an order means deleting it, not editing it.
+  await assertFails(update(ref(owner, `${logsPath}/${id}`), { total: 1 }));
+  await assertFails(update(ref(owner, `${logsPath}/${id}`), { analyticsExcluded: true }));
+  await assertFails(update(ref(owner, `${logsPath}/${id}`), { customerName: "Someone Else" }));
+});
+
+test("a branch manager cannot write outside the branch they run", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+
+  // Menu edits and roster changes are scoped to the manager's own branch.
+  await assertFails(set(ref(manager, `${companyId}/branches/${otherBranchId}/categories/Drinks/tea`), {
+    name: "Tea",
+    price: 90,
+  }));
+  await assertFails(set(ref(manager, `${companyId}/branches/${otherBranchId}/users/new-hire`), {
+    uid: "new-hire",
+    role: "staff",
+  }));
+  // Another company is out of reach entirely.
+  await assertFails(get(ref(manager, "company-someone-else/branches/branch-x/categories")));
+  // Branch control stays with the company owner.
+  await assertFails(remove(ref(manager, `${companyId}/branches/${otherBranchId}`)));
+
+  // The same write inside their own branch is fine, which is what makes the
+  // denials above about scope rather than about the operation.
+  await assertSucceeds(set(ref(manager, `${branchPath}/categories/Drinks/tea`), {
+    name: "Tea",
+    price: 90,
+  }));
+});
+
+test("a branch manager cannot promote anyone to manager", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const newbie = "brand-new-staff";
+
+  // Managers add staff only — never a peer, and never the owner slot.
+  await assertSucceeds(set(ref(manager, `${branchPath}/users/${newbie}`), {
+    uid: newbie,
+    role: "staff",
+  }));
+  await assertFails(set(ref(manager, `${branchPath}/users/promoted`), {
+    uid: "promoted",
+    role: "manager",
+  }));
+  await assertFails(set(ref(manager, `${branchPath}/users/fake-owner`), {
+    uid: "fake-owner",
+    role: "owner",
+  }));
+  await assertSucceeds(set(ref(owner, `${branchPath}/users/appointed`), {
+    uid: "appointed",
+    role: "manager",
+  }));
+});
+
+test("a signed-in stranger cannot write itself into a company or branch", async () => {
+  const stranger = testEnv.authenticatedContext(outsiderUid).database();
+
+  // Self-insertion is the escalation path, not a convenience: the company-wide
+  // .read trusts the member list, so a forged row buys read access to every
+  // branch the company owns, and a forged branch row named 'manager' buys the
+  // menu with it. Membership has to come from someone who already has standing.
+  await assertFails(set(ref(stranger, `${companyId}/users/${outsiderUid}`), {
+    uid: outsiderUid,
+    email: "x@example.com",
+    companyId,
+    companyRole: "manager",
+    branchIds: { [branchId]: true },
+  }));
+  await assertFails(set(ref(stranger, `${branchPath}/users/${outsiderUid}`), {
+    uid: outsiderUid,
+    role: "manager",
+  }));
+  await assertFails(set(ref(stranger, `${branchPath}/users/${outsiderUid}`), {
+    uid: outsiderUid,
+    role: "staff",
+  }));
+  // Nor can it mint an account record, which is what resolves companyId at login.
+  await assertFails(set(ref(stranger, `accounts/${outsiderUid}`), {
+    uid: outsiderUid,
+    companyId,
+    activeBranchId: branchId,
+    role: "manager",
+  }));
+  await assertFails(set(ref(stranger, `${branchPath}/branchProfile/managerUid`), outsiderUid));
+  await assertFails(get(ref(stranger, `${branchPath}/categories`)));
+
+  // Creating a company of its own is still allowed — that is onboarding, and the
+  // company does not exist yet, so nothing is overwritten.
+  await assertSucceeds(set(ref(stranger, "company-stranger-own/companyProfile"), {
+    companyId: "company-stranger-own",
+    companyName: "Stranger Co",
+    ownerUids: { [outsiderUid]: true },
+  }));
+});
+
+test("members maintain their own records without being able to re-rank themselves", async () => {
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+
+  // Sign-in refreshes the profile row, so self-service has to keep working.
+  await assertSucceeds(update(ref(staff, `${companyId}/users/${staffUid}`), {
+    displayName: "Renamed",
+  }));
+  await assertSucceeds(update(ref(staff, `${branchPath}/users/${staffUid}`), {
+    uid: staffUid,
+    role: "staff",
+    addedAt: 1,
+  }));
+
+  // But the role itself is not theirs to raise, in either record.
+  await assertFails(update(ref(staff, `${companyId}/users/${staffUid}`), {
+    companyRole: "manager",
+  }));
+  await assertFails(set(ref(staff, `${branchPath}/users/${staffUid}`), {
+    uid: staffUid,
+    role: "owner",
+  }));
+  await assertFails(set(ref(staff, `${branchPath}/users/${staffUid}`), {
+    uid: staffUid,
+    role: "manager",
+  }));
+
+  // A manager may not promote itself either.
+  await assertFails(set(ref(manager, `${branchPath}/users/${branchManagerUid}`), {
+    uid: branchManagerUid,
+    role: "owner",
+  }));
+});
+
+test("a branch manager can take staff off the roster but not the owner", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const hire = "short-lived-hire";
+
+  await assertSucceeds(set(ref(manager, `${branchPath}/users/${hire}`), {
+    uid: hire,
+    role: "staff",
+  }));
+  await assertSucceeds(set(ref(manager, `${companyId}/users/${hire}`), {
+    uid: hire,
+    email: "hire@example.com",
+    companyId,
+    companyRole: "staff",
+    branchIds: { [branchId]: true },
+  }));
+
+  // removeTeamMember() clears the branch row, the company profile and the account
+  // record; leaving any one of them behind strands a half-removed member.
+  await assertSucceeds(remove(ref(manager, `${branchPath}/users/${hire}`)));
+  await assertSucceeds(remove(ref(manager, `${companyId}/users/${hire}`)));
+
+  // The owner is not a manager's to remove, on either node.
+  await assertFails(remove(ref(manager, `${branchPath}/users/${managerUid}`)));
+  await assertFails(remove(ref(manager, `${companyId}/users/${managerUid}`)));
 });
