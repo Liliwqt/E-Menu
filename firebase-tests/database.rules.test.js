@@ -801,3 +801,82 @@ test("flagging an order leaves the order record itself untouched", async () => {
   await assertFails(update(ref(manager, `${logsPath}/${id}`), { total: 1 }));
   await assertFails(update(ref(manager, `${logsPath}/${id}`), { analyticsExcluded: true }));
 });
+
+// ===== Kiosk management =====
+//
+// Running a branch includes managing the tablets in it, so MANAGER_CAPS carries
+// MANAGE_KIOSKS and the Kiosks page is gated on it. The rules only ever allowed
+// the branch owner, which made every control on that page fail for the role the
+// page was opened for: register, enable, disable and deregister all write through
+// at least one owner-only path.
+
+const newKioskUid = "branch-manager-enrolled-kiosk";
+
+test("a branch manager can register and manage a kiosk in their own branch", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+
+  // 1. the branch's kiosk record
+  await assertSucceeds(set(ref(manager, `${branchPath}/kiosks/${newKioskUid}`), {
+    kioskUid: newKioskUid,
+    name: "Front Counter",
+    isActive: true,
+  }));
+  // 2. toggling it, which is the same node
+  await assertSucceeds(update(ref(manager, `${branchPath}/kiosks/${newKioskUid}`), {
+    isActive: false,
+  }));
+  // 3. the company's enrollment record
+  await assertSucceeds(set(ref(manager, `${companyId}/kioskEnrollments/${newKioskUid}`), {
+    kioskUid: newKioskUid,
+    companyId,
+    branchId,
+    name: "Front Counter",
+    isActive: true,
+    registeredAt: 1,
+  }));
+  // 4. the root pointer the device reads before it knows its company
+  await assertSucceeds(set(ref(manager, `kioskEnrollments/${newKioskUid}`), {
+    companyId,
+    branchId,
+    isActive: true,
+    updatedAt: 1,
+  }));
+});
+
+test("staff cannot manage kiosks", async () => {
+  const staff = testEnv.authenticatedContext(staffUid).database();
+
+  await assertFails(set(ref(staff, `${branchPath}/kiosks/${newKioskUid}`), {
+    kioskUid: newKioskUid,
+    name: "Front Counter",
+    isActive: true,
+  }));
+  await assertFails(set(ref(staff, `${companyId}/kioskEnrollments/${newKioskUid}`), {
+    kioskUid: newKioskUid,
+    companyId,
+    branchId,
+    name: "Front Counter",
+    isActive: true,
+    registeredAt: 1,
+  }));
+});
+
+test("a branch manager cannot register a kiosk into another branch", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+
+  // Managing devices is scoped to the branch being managed. The neighbouring
+  // branch has a different ownerUid and no managerUid pointing at this account.
+  await assertFails(set(ref(manager, `${companyId}/branches/${otherBranchId}/kiosks/${newKioskUid}`), {
+    kioskUid: newKioskUid,
+    name: "Smuggled",
+    isActive: true,
+  }));
+  await assertFails(set(ref(manager, `${companyId}/kioskEnrollments/${newKioskUid}`), {
+    kioskUid: newKioskUid,
+    companyId,
+    branchId: otherBranchId,
+    name: "Smuggled",
+    isActive: true,
+    registeredAt: 1,
+  }));
+});
