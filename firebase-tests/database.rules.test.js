@@ -538,6 +538,143 @@ test("a branch manager cannot promote anyone to manager", async () => {
   }));
 });
 
+test("replacing a manager means stepping the role down, not just moving the pointer", async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const outgoing = testEnv.authenticatedContext(branchManagerUid).database();
+
+  // The accounts row provisioning writes, which is what loadAccessContext() reads
+  // as accountRole.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), `accounts/${branchManagerUid}`), {
+      uid: branchManagerUid,
+      companyId,
+      activeBranchId: branchId,
+      role: "manager",
+    });
+  });
+
+  // In post, they run the branch — the menu is theirs to edit.
+  await assertSucceeds(
+    set(ref(outgoing, `${branchPath}/categories/Drinks/tea`), { name: "Tea", price: 90 })
+  );
+
+  // Handing branchProfile/managerUid to a successor is NOT the handover. Menu
+  // writes read the membership row's role, so moving the pointer alone leaves the
+  // outgoing manager editing the menu, the settings and the thresholds.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), `${branchPath}/branchProfile/managerUid`), "successor-uid");
+  });
+  await assertSucceeds(
+    set(ref(outgoing, `${branchPath}/categories/Drinks/juice`), { name: "Juice", price: 80 })
+  );
+
+  // The step-down itself has to be writable by the owner, including the accounts
+  // row the owner is not permitted to read back.
+  await assertSucceeds(
+    update(ref(owner, `${branchPath}/users/${branchManagerUid}`), { role: "staff" })
+  );
+  await assertSucceeds(
+    update(ref(owner, `${companyId}/users/${branchManagerUid}`), {
+      role: "staff",
+      companyRole: "staff",
+    })
+  );
+  await assertSucceeds(update(ref(owner, `accounts/${branchManagerUid}`), { role: "staff" }));
+
+  // Only now is the branch closed to them, and the staff-adding power they held a
+  // moment ago goes with it.
+  await assertFails(
+    set(ref(outgoing, `${branchPath}/categories/Drinks/soda`), { name: "Soda", price: 70 })
+  );
+  await assertFails(
+    set(ref(outgoing, `${branchPath}/users/extra`), { uid: "extra", role: "staff" })
+  );
+
+  // Which leaves the outgoing manager as a normal member: they can still read
+  // their own row, so this is a step-down rather than an eviction.
+  await assertSucceeds(get(ref(outgoing, `${branchPath}/users/${branchManagerUid}`)));
+});
+
+test("a branch with no manager hands every management action back to its owner", async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const neighbouringManager = testEnv.authenticatedContext(branchManagerUid).database();
+  const unmanaged = `${companyId}/branches/${otherBranchId}`;
+
+  // IT Park has an ownerUid and no managerUid. That is both what a branch looks
+  // like at onboarding and what removing its only manager leaves behind, so the
+  // owner has to be able to run it directly — otherwise a manager leaving strands
+  // the branch until the owner can be talked through the database console.
+  await assertSucceeds(
+    set(ref(owner, `${unmanaged}/categories/Drinks/tea`), { name: "Tea", price: 90 })
+  );
+  await assertSucceeds(
+    set(ref(owner, `${unmanaged}/appSettings`), { businessName: "IT Park" })
+  );
+  await assertSucceeds(
+    set(ref(owner, `${unmanaged}/users/new-hire`), { uid: "new-hire", role: "staff" })
+  );
+  await assertSucceeds(
+    set(ref(owner, `${unmanaged}/kiosks/kiosk-1`), {
+      kioskUid: "kiosk-1",
+      name: "Counter",
+      isActive: true,
+    })
+  );
+
+  // Appointing a manager is how the fallback ends, so that write has to work too.
+  await assertSucceeds(
+    set(ref(owner, `${unmanaged}/branchProfile/managerUid`), "successor-uid")
+  );
+
+  // The fallback goes to the company owner, not to whoever else happens to hold a
+  // manager role somewhere nearby. The other branch's manager inherits nothing.
+  await assertFails(
+    set(ref(neighbouringManager, `${unmanaged}/categories/Drinks/tea`), { name: "Tea", price: 90 })
+  );
+  await assertFails(
+    set(ref(neighbouringManager, `${unmanaged}/users/new-hire`), { uid: "new-hire", role: "staff" })
+  );
+  await assertFails(
+    set(ref(neighbouringManager, `${unmanaged}/kiosks/kiosk-2`), {
+      kioskUid: "kiosk-2",
+      name: "Counter",
+      isActive: true,
+    })
+  );
+});
+
+test("removing a member clears the account record, which is the only record a delete can read from", async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+
+  // Deleting is the one write where newData is empty, so the ownership check has
+  // nothing to look the company up from. An owner deleting another member's
+  // record was refused, and the removal code swallowed the refusal — leaving the
+  // person's next sign-in still carrying a role for a company they had been taken
+  // out of.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), `accounts/${staffUid}`), {
+      uid: staffUid,
+      companyId,
+      activeBranchId: branchId,
+      role: "staff",
+    });
+  });
+
+  await assertSucceeds(remove(ref(owner, `accounts/${staffUid}`)));
+
+  // Still confined to the owner's own company: an account belonging to a company
+  // this person has no standing in is out of reach.
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), "accounts/someone-else"), {
+      uid: "someone-else",
+      companyId: "company-someone-else",
+      activeBranchId: "branch-someone-else",
+      role: "staff",
+    });
+  });
+  await assertFails(remove(ref(owner, "accounts/someone-else")));
+});
+
 test("a signed-in stranger cannot write itself into a company or branch", async () => {
   const stranger = testEnv.authenticatedContext(outsiderUid).database();
 
