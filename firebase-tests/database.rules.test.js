@@ -656,3 +656,148 @@ test("the rules mirrored into the kiosk repo match the ones actually deployed", 
     "MenuApplication VsCode /database.rules.json no longer matches the deployed policy"
   );
 });
+
+// ===== Analytics exclusions =====
+//
+// Excluding an order flags it as not counting toward the analytics roll-up. It
+// is an accounting adjustment, not an edit to the order: the order stays in the
+// ledger, the flag records who set it and why, and it can be lifted again.
+//
+// It lives in its own node rather than on the order itself. Writing it onto the
+// order would mean relaxing the .write rule on /logs, which currently allows
+// exactly one thing - a kiosk creating an order that does not exist yet. That
+// rule is what makes kiosk orders immutable, and an adjustment is not worth
+// trading it away.
+
+const exclusion = (orderId, uid) => ({
+  excluded: true,
+  reason: "Duplicate order",
+  at: { ".sv": "timestamp" },
+  by: uid,
+});
+
+test("a branch manager can flag an order out of the analytics roll-up", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const owner = testEnv.authenticatedContext(managerUid).database();
+
+  await assertSucceeds(set(ref(manager, `${branchPath}/analyticsExclusions/ORDER-1`), exclusion("ORDER-1", branchManagerUid)));
+  await assertSucceeds(set(ref(owner, `${branchPath}/analyticsExclusions/ORDER-2`), exclusion("ORDER-2", managerUid)));
+
+  // The flag can be lifted, which is what makes it safe to set.
+  await assertSucceeds(remove(ref(manager, `${branchPath}/analyticsExclusions/ORDER-1`)));
+});
+
+test("staff can see the flags but not set them", async () => {
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+
+  await assertSucceeds(get(ref(staff, `${branchPath}/analyticsExclusions`)));
+
+  // Excluding flatters the numbers, so it stays with the roles that answer for them.
+  await assertFails(set(ref(staff, `${branchPath}/analyticsExclusions/ORDER-3`), exclusion("ORDER-3", staffUid)));
+  await assertFails(remove(ref(staff, `${branchPath}/analyticsExclusions/ORDER-1`)));
+
+  // And the manager's own flag is still there afterwards, which is what makes the
+  // denial above about permissions rather than about the node being empty.
+  await assertSucceeds(set(ref(manager, `${branchPath}/analyticsExclusions/ORDER-1`), exclusion("ORDER-1", branchManagerUid)));
+  await assertSucceeds(get(ref(staff, `${branchPath}/analyticsExclusions/ORDER-1`)));
+});
+
+test("an exclusion cannot be forged or left unattributed", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const outsider = testEnv.authenticatedContext(outsiderUid).database();
+
+  await assertFails(set(ref(outsider, `${branchPath}/analyticsExclusions/ORDER-4`), exclusion("ORDER-4", outsiderUid)));
+
+  // `by` has to be the writer, so an exclusion always names the account that
+  // decided it rather than whatever the client felt like putting there.
+  await assertFails(set(ref(manager, `${branchPath}/analyticsExclusions/ORDER-5`), {
+    excluded: true,
+    reason: "Duplicate order",
+    at: { ".sv": "timestamp" },
+    by: managerUid,
+  }));
+  await assertFails(set(ref(manager, `${branchPath}/analyticsExclusions/ORDER-6`), {
+    excluded: true,
+    reason: "",
+    at: { ".sv": "timestamp" },
+    by: branchManagerUid,
+  }));
+  await assertFails(set(ref(manager, `${branchPath}/analyticsExclusions/ORDER-7`), {
+    excluded: true,
+    by: branchManagerUid,
+  }));
+  await assertFails(set(ref(manager, `${branchPath}/analyticsExclusions/ORDER-8`), {
+    reason: "Duplicate order",
+    at: { ".sv": "timestamp" },
+    by: branchManagerUid,
+  }));
+});
+
+test("exclusions cannot be set from outside the branch that owns the order", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const staff = testEnv.authenticatedContext(staffUid).database();
+
+  // A branch manager has no standing in the branch next door: they run one
+  // branch, and the neighbouring one has a different ownerUid and no managerUid
+  // pointing at them.
+  await assertFails(set(
+    ref(manager, `${companyId}/branches/${otherBranchId}/analyticsExclusions/ORDER-9`),
+    exclusion("ORDER-9", branchManagerUid)
+  ));
+  await assertFails(set(
+    ref(staff, `${companyId}/branches/${otherBranchId}/analyticsExclusions/ORDER-9`),
+    exclusion("ORDER-9", staffUid)
+  ));
+
+  // Neither of them can reach into a company they are not part of.
+  await assertFails(set(
+    ref(staff, `${companyId}/branches/${branchId}/analyticsExclusions/ORDER-9-own`),
+    exclusion("ORDER-9-own", staffUid)
+  ));
+});
+
+test("only a company that does not exist yet is open to anyone", async () => {
+  // This documents the onboarding bootstrap rather than a gap in the exclusions
+  // node, because the first assertion here is the reason the second company in
+  // the previous test had to be one that already exists. $companyId/.write is
+  // gated on `!data.exists()`, so a signed-in account may populate the tree of a
+  // company id nobody has claimed — that is how a new owner creates their own
+  // company, since there is no server to do it for them.
+  //
+  // It is bounded rather than open: companyProfile/.validate requires the writer
+  // to list themselves in ownerUids, so an account can only create a company it
+  // owns, and the moment the company exists the clause stops applying. Closing
+  // it entirely needs a Cloud Function on company creation, which this project
+  // does not have.
+  const stranger = testEnv.authenticatedContext(outsiderUid).database();
+  const unclaimed = "company-nobody-has-claimed";
+
+  await assertSucceeds(set(
+    ref(stranger, `${unclaimed}/branches/branch-x/analyticsExclusions/A`),
+    exclusion("A", outsiderUid)
+  ));
+
+  // The same write against a company that exists is refused.
+  await assertFails(set(
+    ref(stranger, `${companyId}/branches/${branchId}/analyticsExclusions/A`),
+    exclusion("A", outsiderUid)
+  ));
+});
+
+test("flagging an order leaves the order record itself untouched", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const id = "123e4567-e89b-12d3-a456-426614174020";
+  const logsPath = `${branchPath}/logs`;
+
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), `${logsPath}/${id}`), validOrder(companyKioskUid, id));
+  });
+
+  // The point of the separate node: the adjustment succeeds without the order
+  // becoming writable. Both halves are asserted, because a change that made the
+  // second one pass would be the wrong fix.
+  await assertSucceeds(set(ref(manager, `${branchPath}/analyticsExclusions/${id}`), exclusion(id, branchManagerUid)));
+  await assertFails(update(ref(manager, `${logsPath}/${id}`), { total: 1 }));
+  await assertFails(update(ref(manager, `${logsPath}/${id}`), { analyticsExcluded: true }));
+});
