@@ -353,6 +353,84 @@ test("retry after partial company works", async () => {
 
 const branchPath = `${companyId}/branches/${branchId}`;
 
+test("subscription upgrade and downgrade persist both owner billing records without changing operations", async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const workspacePath = `${companyId}/users/${managerUid}/workspace`;
+  const profilePath = `${branchPath}/branchProfile`;
+  await assertSucceeds(set(ref(owner, workspacePath), {
+    companyId,
+    branchId,
+    plan: "free",
+    subscriptionStatus: "inactive",
+    onboardingComplete: true,
+  }));
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), `${branchPath}/logs/existing-order`), validOrder());
+  });
+  const before = (await get(ref(owner, branchPath))).val();
+  const trialEndsAt = Date.now() + 14 * 24 * 60 * 60 * 1000;
+
+  // Match workspaceApi's two sequential update() calls, including the null
+  // expiry on downgrade. A root update alone would not exercise this flow.
+  for (const billing of [
+    { plan: "subscription", subscriptionStatus: "trialing", trialEndsAt },
+    { plan: "free", subscriptionStatus: "inactive", trialEndsAt: null },
+    { plan: "subscription", subscriptionStatus: "trialing", trialEndsAt: trialEndsAt + 1000 },
+  ]) {
+    const patch = { ...billing, updatedAt: { ".sv": "timestamp" } };
+    await assertSucceeds(update(ref(owner, workspacePath), patch));
+    await assertSucceeds(update(ref(owner, profilePath), patch));
+
+    for (const recordPath of [workspacePath, profilePath]) {
+      const record = (await assertSucceeds(get(ref(owner, recordPath)))).val();
+      assert.equal(record.plan, billing.plan);
+      assert.equal(record.subscriptionStatus, billing.subscriptionStatus);
+      assert.equal(record.trialEndsAt ?? null, billing.trialEndsAt);
+      assert.equal(typeof record.updatedAt, "number");
+    }
+    const after = (await get(ref(owner, branchPath))).val();
+    for (const key of ["categories", "inventory", "logs"]) {
+      assert.deepEqual(after[key], before[key], `${key} must survive a plan change`);
+    }
+    assert.equal(after.branchProfile.managerUid, branchManagerUid);
+    assert.equal((await get(ref(owner, workspacePath))).val().onboardingComplete, true);
+  }
+});
+
+for (const [role, uid] of [["manager", branchManagerUid], ["staff", staffUid]]) {
+  test(`${role} can read the branch plan but cannot change branch or owner billing`, async () => {
+    const owner = testEnv.authenticatedContext(managerUid).database();
+    const member = testEnv.authenticatedContext(uid).database();
+    const profilePath = `${branchPath}/branchProfile`;
+    const workspacePath = `${companyId}/users/${managerUid}/workspace`;
+    const trial = {
+      plan: "subscription",
+      subscriptionStatus: "trialing",
+      trialEndsAt: Date.now() + 14 * 24 * 60 * 60 * 1000,
+    };
+    const free = { plan: "free", subscriptionStatus: "inactive", trialEndsAt: null };
+
+    for (const [current, attempted] of [[free, trial], [trial, free]]) {
+      await assertSucceeds(update(ref(owner, workspacePath), current));
+      await assertSucceeds(update(ref(owner, profilePath), current));
+      const before = (await assertSucceeds(get(ref(member, profilePath)))).val();
+      assert.equal(before.plan, current.plan);
+      assert.equal(before.subscriptionStatus, current.subscriptionStatus);
+
+      // Reject each app write separately and direct edits to individual fields.
+      for (const recordPath of [workspacePath, profilePath]) {
+        await assertFails(update(ref(member, recordPath), attempted));
+        for (const [field, value] of Object.entries(attempted)) {
+          await assertFails(set(ref(member, `${recordPath}/${field}`), value));
+        }
+      }
+      assert.deepEqual((await get(ref(member, profilePath))).val(), before);
+      assert.deepEqual((await get(ref(owner, workspacePath))).val(),
+        Object.fromEntries(Object.entries(current).filter(([, value]) => value !== null)));
+    }
+  });
+}
+
 test("staff can append inventory history, which is written on every restock", async () => {
   const staff = testEnv.authenticatedContext(staffUid).database();
   const manager = testEnv.authenticatedContext(branchManagerUid).database();
@@ -1016,4 +1094,15 @@ test("a branch manager cannot register a kiosk into another branch", async () =>
     isActive: true,
     registeredAt: 1,
   }));
+});
+
+test('staff can patch availability without gaining menu editing access', async () => {
+  const db = testEnv.authenticatedContext(staffUid).database();
+  const item = ref(db, `${companyId}/branches/${branchId}/categories/Drinks/coffee`);
+  await assertSucceeds(update(item, { available: false, manualUnavailable: true }));
+  await assertSucceeds(update(item, { available: true, manualUnavailable: false }));
+  await assertFails(update(item, { price: 1, available: false }));
+  await assertFails(remove(item));
+  await assertFails(update(ref(db, `${companyId}/branches/${branchId}/categories/Drinks/new`), { available: true, manualUnavailable: false }));
+  await assertFails(update(ref(db, `${companyId}/branches/${otherBranchId}/categories/Drinks/coffee`), { available: false }));
 });
