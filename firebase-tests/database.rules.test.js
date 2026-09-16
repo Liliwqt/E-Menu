@@ -1074,6 +1074,16 @@ test("staff cannot manage kiosks", async () => {
     isActive: true,
     registeredAt: 1,
   }));
+  // The two records the portal's Enable/Disable switch writes on every toggle.
+  // Staff may see the kiosk list (MANAGE_KIOSKS is manager-and-above, so the
+  // buttons are hidden from them) but must not be able to revoke a device by
+  // hand from the console either.
+  await assertFails(update(ref(staff, `${companyId}/kioskEnrollments/${newKioskUid}`), {
+    isActive: false,
+  }));
+  await assertFails(update(ref(staff, `kioskEnrollments/${newKioskUid}`), {
+    isActive: false,
+  }));
 });
 
 test("a branch manager cannot register a kiosk into another branch", async () => {
@@ -1094,6 +1104,66 @@ test("a branch manager cannot register a kiosk into another branch", async () =>
     isActive: true,
     registeredAt: 1,
   }));
+});
+
+/**
+ * The portal's Enable/Disable switch (setKioskActive) writes to three kiosk
+ * records, and each write is an `update` carrying nothing but the flag and its
+ * timestamps. That shape has to survive the merge: the branch record's validation
+ * requires kioskUid/name/isActive, and the two enrolment records require
+ * kioskUid/companyId/branchId/name/registeredAt, none of which the toggle
+ * overwrites. The device then reads the root pointer, and the order rules read the
+ * branch record, so both are switched here and both are exercised.
+ */
+const toggledKioskUid = "toggle-target-kiosk";
+
+test("a manager can switch a kiosk off and on across every record the portal writes", async () => {
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const kioskDb = kiosk(toggledKioskUid);
+
+  // Registered (the app's register shape), so the later updates have something to
+  // merge into rather than creating a record with missing required children.
+  await assertSucceeds(set(ref(manager, `${branchPath}/kiosks/${toggledKioskUid}`), {
+    kioskUid: toggledKioskUid,
+    name: "Toggle Target",
+    registeredAt: 1,
+    isActive: true,
+  }));
+  await assertSucceeds(set(ref(manager, `${companyId}/kioskEnrollments/${toggledKioskUid}`), {
+    kioskUid: toggledKioskUid,
+    companyId,
+    branchId,
+    name: "Toggle Target",
+    registeredAt: 1,
+    isActive: true,
+  }));
+  await assertSucceeds(set(ref(manager, `kioskEnrollments/${toggledKioskUid}`), {
+    companyId,
+    branchId,
+    isActive: true,
+  }));
+
+  // The switch itself: one flag, both directions, on all three records. The
+  // enrolment and pointer validations require children the update does not touch,
+  // so a validation that refused this shape would break the button in production.
+  const flip = async (isActive) => {
+    const flag = { isActive, lastActiveAt: 1, updatedAt: 1 };
+    await assertSucceeds(update(ref(manager, `${branchPath}/kiosks/${toggledKioskUid}`), flag));
+    await assertSucceeds(update(ref(manager, `${companyId}/kioskEnrollments/${toggledKioskUid}`), flag));
+    await assertSucceeds(update(ref(manager, `kioskEnrollments/${toggledKioskUid}`), flag));
+  };
+
+  const id = "123e4567-e89b-12d3-a456-4266141740aa";
+
+  await flip(false);
+  // Switched off means switched off for the device: the order rule reads the
+  // branch record, so the tablet cannot submit while it is off.
+  await assertFails(set(ref(kioskDb, `${branchPath}/logs/${id}`), validOrder(toggledKioskUid, id)));
+
+  // Switched back on, the same tablet works again — the whole point of the
+  // Enable button, which used to leave the root pointer off.
+  await flip(true);
+  await assertSucceeds(set(ref(kioskDb, `${branchPath}/logs/${id}`), validOrder(toggledKioskUid, id)));
 });
 
 test('staff can patch availability without gaining menu editing access', async () => {
