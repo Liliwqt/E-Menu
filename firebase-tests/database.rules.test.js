@@ -1176,3 +1176,39 @@ test('staff can patch availability without gaining menu editing access', async (
   await assertFails(update(ref(db, `${companyId}/branches/${branchId}/categories/Drinks/new`), { available: true, manualUnavailable: false }));
   await assertFails(update(ref(db, `${companyId}/branches/${otherBranchId}/categories/Drinks/coffee`), { available: false }));
 });
+
+test('owner billing changes are atomic and members cannot partially apply them', async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const workspacePath = `${companyId}/users/${managerUid}/workspace`;
+  const profilePath = `${branchPath}/branchProfile`;
+  await set(ref(owner, workspacePath), { plan: 'free', subscriptionStatus: 'inactive' });
+  const before = (await get(ref(owner, branchPath))).val();
+  await assertFails(update(ref(owner), {
+    [`${workspacePath}/plan`]: 'subscription',
+    [`${profilePath}/branchId`]: 'wrong-branch',
+  }));
+  assert.equal((await get(ref(owner, `${workspacePath}/plan`))).val(), 'free');
+  assert.deepEqual((await get(ref(owner, branchPath))).val(), before);
+  for (const billing of [
+    { plan: 'subscription', subscriptionStatus: 'trialing', trialEndsAt: Date.now() + 86400000 },
+    { plan: 'free', subscriptionStatus: 'inactive', trialEndsAt: null },
+  ]) {
+    const changes = {};
+    for (const [field, value] of Object.entries(billing)) {
+      changes[`${workspacePath}/${field}`] = value;
+      changes[`${profilePath}/${field}`] = value;
+    }
+    await assertSucceeds(update(ref(owner), changes));
+    const profile = (await get(ref(owner, profilePath))).val();
+    const workspace = (await get(ref(owner, workspacePath))).val();
+    for (const field of Object.keys(billing)) assert.equal(profile[field] ?? null, workspace[field] ?? null);
+    for (const uid of [branchManagerUid, staffUid]) {
+      const member = testEnv.authenticatedContext(uid).database();
+      await assertFails(update(ref(member), { [`${profilePath}/plan`]: 'subscription', [`${workspacePath}/plan`]: 'subscription' }));
+      assert.deepEqual((await get(ref(owner, profilePath))).val(), profile);
+      assert.deepEqual((await get(ref(owner, workspacePath))).val(), workspace);
+    }
+  }
+  const after = (await get(ref(owner, branchPath))).val();
+  for (const key of ['categories', 'inventory', 'logs', 'users']) assert.deepEqual(after[key], before[key]);
+});
