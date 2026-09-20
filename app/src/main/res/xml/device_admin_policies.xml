@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<device-admin xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Device-owner lock-task APIs do not require legacy device-admin policies. -->
-    <uses-policies />
-</device-admin>

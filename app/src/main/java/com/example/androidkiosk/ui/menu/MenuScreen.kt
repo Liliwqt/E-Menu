@@ -125,7 +125,7 @@ fun MenuScreen(
     viewModel: MenuViewModel,
     showPinDialog: Boolean = false,
     isAdminUnlocked: Boolean = false,
-    unlockMethod: UnlockMethod = UnlockMethod.VOLUME_BUTTON,
+    unlockMethod: UnlockMethod = UnlockMethod.CORNER_TAP,
     pinManager: PinManager? = null,
     onPinDialogDismiss: () -> Unit = {},
     onUnlockSuccess: (UnlockMethod) -> Unit = {},

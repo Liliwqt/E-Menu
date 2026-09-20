@@ -22,9 +22,6 @@ class UnlockAttemptLogger @Inject constructor() {
 
 /** How the admin PIN dialog was triggered. */
 enum class UnlockMethod {
-    /** Volume Up long press (3+ seconds). */
-    VOLUME_BUTTON,
-
     /** Secret corner tap (5 taps in top-right corner). */
     CORNER_TAP
 }

@@ -61,28 +61,6 @@ fun KioskAuthorizationScreen(
     }
 }
 
-@Composable
-fun KioskProvisioningRequiredScreen(status: String) {
-    val theme = LocalBackgroundTheme.current
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(40.dp)) {
-            Text(
-                text = "Secure kiosk provisioning required",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = theme.primaryTextColor,
-                textAlign = TextAlign.Center
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = "Ordering is disabled because device-owner lock task is not active. Status: $status",
-                color = theme.secondaryTextColor,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
 /** Loading screen with shimmer skeleton effect. */
 @Composable
 fun LoadingScreen() {
