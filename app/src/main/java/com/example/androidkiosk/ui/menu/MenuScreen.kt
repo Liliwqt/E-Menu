@@ -44,10 +44,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LargeFloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -76,6 +73,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -254,6 +252,14 @@ fun MenuScreen(
             Scaffold(
                 containerColor = Color.Transparent,
                 modifier = Modifier.fillMaxSize(),
+                bottomBar = {
+                    if (isAuthorized && selectedUIMode != null && !isLoading && errorMessage == null) {
+                        CartSummaryBar(
+                            cartItems = cartItems,
+                            onViewCart = { showCart = true }
+                        )
+                    }
+                }
             ) { paddingValues ->
                 when {
                     !isAuthorized -> KioskAuthorizationScreen(
@@ -315,44 +321,6 @@ fun MenuScreen(
                 }
             }
         }
-        if (isAuthorized) Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(32.dp)
-        ) {
-            BadgedBox(
-                badge = {
-                    if (cartItems.isNotEmpty()) {
-                        Badge(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError
-                        ) {
-                            Text(
-                                text = cartItems.sumOf { it.quantity }.toString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .padding(8.dp)
-            ) {
-                LargeFloatingActionButton(
-                    onClick = { showCart = true },
-                    containerColor = bgTheme.buttonContainerColor,
-                    contentColor = bgTheme.buttonContentColor,
-                    shape = MaterialTheme.shapes.extraLarge
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ShoppingCart,
-                        contentDescription = "Shopping Cart",
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-            }
-        }
-
         // ── Overlays ───────────────────────────────────────────
         if (isAuthorized) selectedItem?.let { item ->
             ItemDetailOverlay(
@@ -888,12 +856,63 @@ private fun MenuContent(
 }
 
 @Composable
+private fun CartSummaryBar(
+    cartItems: List<CartItem>,
+    onViewCart: () -> Unit
+) {
+    val theme = LocalBackgroundTheme.current
+    val hasItems = cartItems.isNotEmpty()
+    val itemCount = CartPresentation.cartItemCount(cartItems)
+    val total = CartPresentation.cartTotal(cartItems)
+
+    Button(
+        onClick = onViewCart,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .height(60.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (hasItems) theme.buttonContainerColor else theme.surfaceOverlayColor,
+            contentColor = if (hasItems) theme.buttonContentColor else theme.primaryTextColor
+        )
+    ) {
+        Icon(
+            imageVector = Icons.Default.ShoppingCart,
+            contentDescription = null,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        if (hasItems) {
+            Text(
+                text = "View cart · ${if (itemCount == 1) "1 item" else "$itemCount items"}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = CartPresentation.formatPrice(total),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold
+            )
+        } else {
+            Text(
+                text = "View cart",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
 private fun CartOverlay(
     viewModel: MenuViewModel,
     onDismiss: () -> Unit,
     onProceedToCheckout: () -> Unit
 ) {
     val cartItems by viewModel.cartItems.collectAsState()
+    val inventoryStock by viewModel.inventoryStock.collectAsState()
     var isVisible by remember { mutableStateOf(false) }
     var isCheckoutTransition by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -1002,6 +1021,10 @@ private fun CartOverlay(
                                 items(cartItems) { item ->
                                     CartListItem(
                                         cartItem = item,
+                                        quantityLimit = MenuQuantityRules.quantityLimit(
+                                            itemStock = inventoryStock["${item.menuItem.categoryName}/${item.menuItem.id}"],
+                                            sizeKey = item.selectedSize.ifEmpty { MenuQuantityRules.DEFAULT_STOCK_SIZE }
+                                        ),
                                         onRemove = { viewModel.removeFromCart(it) },
                                         onUpdateQuantity = { cartItem, qty ->
                                             viewModel.updateQuantity(cartItem, qty)
@@ -1058,6 +1081,7 @@ private fun CartOverlay(
 @Composable
 private fun CartListItem(
     cartItem: CartItem,
+    quantityLimit: MenuQuantityRules.QuantityLimit,
     onRemove: (CartItem) -> Unit,
     onUpdateQuantity: (CartItem, Int) -> Unit
 ) {
@@ -1084,54 +1108,106 @@ private fun CartListItem(
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(cartItem.menuItem.name, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(
-                "₱${String.format(Locale.getDefault(), "%.2f", cartItem.menuItem.price)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = itemTheme.accentColor
-            )
-        }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            IconButton(
-                onClick = { onUpdateQuantity(cartItem, cartItem.quantity - 1) },
-                modifier = Modifier.size(32.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Default.Remove,
-                    contentDescription = "Decrease",
-                    tint = itemTheme.accentColor,
-                    modifier = Modifier.size(18.dp)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = cartItem.menuItem.name,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    CartPresentation.sizeLabel(cartItem)?.let { size ->
+                        Text(
+                            text = size,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = itemTheme.secondaryTextColor
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = CartPresentation.formatPrice(CartPresentation.lineSubtotal(cartItem)),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = itemTheme.accentColor
                 )
             }
 
-            Text(
-                text = "${cartItem.quantity}",
-                modifier = Modifier.width(24.dp),
-                textAlign = TextAlign.Center,
-                fontWeight = FontWeight.Bold
-            )
+            Spacer(modifier = Modifier.height(4.dp))
 
-            IconButton(
-                onClick = { onUpdateQuantity(cartItem, cartItem.quantity + 1) },
-                modifier = Modifier.size(32.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = "Increase",
-                    tint = itemTheme.accentColor,
-                    modifier = Modifier.size(18.dp)
+                Text(
+                    text = "${CartPresentation.formatPrice(cartItem.price)} each",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = itemTheme.secondaryTextColor
                 )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    val atLimit = cartItem.quantity >= quantityLimit.maxQuantity
+                    IconButton(
+                        onClick = { onUpdateQuantity(cartItem, cartItem.quantity - 1) },
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Remove,
+                            contentDescription = CartPresentation.decreaseContentDescription(
+                                cartItem.menuItem,
+                                cartItem.selectedSize
+                            ),
+                            tint = itemTheme.accentColor,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "${cartItem.quantity}",
+                        modifier = Modifier.width(28.dp),
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    IconButton(
+                        onClick = { onUpdateQuantity(cartItem, cartItem.quantity + 1) },
+                        enabled = !atLimit,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = CartPresentation.increaseContentDescription(
+                                item = cartItem.menuItem,
+                                selectedSize = cartItem.selectedSize,
+                                atLimit = atLimit,
+                                limit = quantityLimit
+                            ),
+                            tint = itemTheme.accentColor,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { onRemove(cartItem) },
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Remove ${cartItem.menuItem.name}",
+                            tint = Color.Red.copy(alpha = 0.7f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
             }
-        }
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        IconButton(onClick = { onRemove(cartItem) }) {
-            Icon(Icons.Default.Delete, contentDescription = "Remove", tint = Color.Red.copy(alpha = 0.7f))
         }
     }
 }
@@ -1224,13 +1300,20 @@ private fun CheckoutOverlay(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = CartPresentation.displayName(item),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${item.quantity} × ${CartPresentation.formatPrice(item.price)} each",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = checkoutTheme.secondaryTextColor
+                                )
+                            }
                             Text(
-                                text = "${item.menuItem.name} x${item.quantity}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Text(
-                                text = "₱${String.format(Locale.getDefault(), "%.2f", item.price * item.quantity)}",
+                                text = CartPresentation.formatPrice(CartPresentation.lineSubtotal(item)),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = checkoutTheme.accentColor

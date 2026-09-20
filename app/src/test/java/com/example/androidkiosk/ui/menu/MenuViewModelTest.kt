@@ -213,6 +213,70 @@ class MenuViewModelTest {
         assertTrue(orderRepository.submittedOrders.isEmpty())
     }
 
+    @Test
+    fun `decrementing to zero removes the cart line`() = runTest(dispatcher) {
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.addToCartWithQuantity(sizedItem, 2, "Medium")
+        val line = viewModel.cartItems.value.single()
+
+        viewModel.updateQuantity(line, 0)
+
+        assertTrue(viewModel.cartItems.value.isEmpty())
+    }
+
+    @Test
+    fun `increase beyond tracked stock is clamped`() = runTest(dispatcher) {
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.addToCartWithQuantity(sizedItem, 1, "Medium")
+        val line = viewModel.cartItems.value.single()
+
+        viewModel.updateQuantity(line, 99)
+
+        assertEquals(2, viewModel.cartItems.value.single().quantity)
+    }
+
+    @Test
+    fun `quantity limit reports its source for the ui`() = runTest(dispatcher) {
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+
+        val stockLimit = viewModel.quantityLimit(sizedItem, "Medium")
+        assertEquals(MenuQuantityRules.LimitSource.STOCK, stockLimit.source)
+        assertEquals(2, stockLimit.maxQuantity)
+
+        val untrackedLimit = viewModel.quantityLimit(sizedItem.copy(id = "legacy"), "Medium")
+        assertEquals(MenuQuantityRules.LimitSource.MAX_ORDER_QUANTITY, untrackedLimit.source)
+        assertEquals(99, untrackedLimit.maxQuantity)
+    }
+
+    @Test
+    fun `failed qr submission preserves cart and retry reuses stable id`() = runTest(dispatcher) {
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.addToCartWithQuantity(sizedItem, 1, "Large")
+        val order = viewModel.confirmOrder("Guest")
+        orderRepository.nextResult = Result.failure(IllegalStateException("offline"))
+
+        viewModel.submitOrder(order, PaymentMethod.QR_CODE, PaymentStatus.CUSTOMER_REPORTED_PAID)
+        advanceUntilIdle()
+
+        assertFalse(viewModel.cartItems.value.isEmpty())
+        assertTrue(viewModel.submissionState.value.errorMessage != null)
+
+        orderRepository.nextResult = Result.success(Unit)
+        viewModel.submitOrder(order, PaymentMethod.QR_CODE, PaymentStatus.CUSTOMER_REPORTED_PAID)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.submissionState.value.isComplete)
+        assertEquals(listOf(order.id, order.id), orderRepository.submittedOrders.map { it.id })
+        assertEquals(
+            listOf(PaymentMethod.QR_CODE, PaymentMethod.QR_CODE),
+            orderRepository.submittedOrders.map { it.paymentMethod }
+        )
+    }
+
     private fun createViewModel() = MenuViewModel(
         menuRepository,
         orderRepository,

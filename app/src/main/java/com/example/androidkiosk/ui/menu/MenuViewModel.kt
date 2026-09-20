@@ -113,15 +113,22 @@ class MenuViewModel @Inject constructor(
         viewModelScope.launch { authManager.refreshAuthorization() }
     }
 
+    /** Current per-size limit for an item, so the UI can disable its increase control at the real cap. */
+    fun quantityLimit(item: MenuItem, selectedSize: String): MenuQuantityRules.QuantityLimit {
+        val effectiveSize = MenuQuantityRules.resolveSize(item, selectedSize)
+        val stockSize = effectiveSize.ifEmpty { MenuQuantityRules.DEFAULT_STOCK_SIZE }
+        val itemStock = inventoryStock.value["${item.categoryName}/${item.id}"]
+        return MenuQuantityRules.quantityLimit(itemStock, stockSize)
+    }
+
     fun addToCartWithQuantity(item: MenuItem, quantity: Int, selectedSize: String = "") {
         if (quantity <= 0) return
         val sizeKey = "${item.categoryName}/${item.id}"
-        val effectiveSize = resolveSelectedSize(item, selectedSize)
-        val stockSize = effectiveSize.ifEmpty { DEFAULT_STOCK_SIZE }
+        val effectiveSize = MenuQuantityRules.resolveSize(item, selectedSize)
+        val stockSize = effectiveSize.ifEmpty { MenuQuantityRules.DEFAULT_STOCK_SIZE }
         val itemStock = inventoryStock.value[sizeKey]
-        val maxStock = itemStock?.get(stockSize) ?: if (itemStock == null) MAX_ITEM_QUANTITY else 0
-        val limit = maxStock.coerceAtMost(MAX_ITEM_QUANTITY)
-        val effectivePrice = effectivePrice(item, effectiveSize)
+        val limit = MenuQuantityRules.quantityLimit(itemStock, stockSize).maxQuantity
+        val effectivePrice = MenuQuantityRules.effectivePrice(item, effectiveSize)
         _cartItems.update { currentCart ->
             val existingIndex = currentCart.indexOfFirst {
                 it.menuItem.id == item.id && it.selectedSize == effectiveSize
@@ -159,10 +166,9 @@ class MenuViewModel @Inject constructor(
             return
         }
         val sizeKey = "${cartItem.menuItem.categoryName}/${cartItem.menuItem.id}"
-        val stockSize = cartItem.selectedSize.ifEmpty { DEFAULT_STOCK_SIZE }
+        val stockSize = cartItem.selectedSize.ifEmpty { MenuQuantityRules.DEFAULT_STOCK_SIZE }
         val itemStock = inventoryStock.value[sizeKey]
-        val maxStock = itemStock?.get(stockSize) ?: if (itemStock == null) MAX_ITEM_QUANTITY else 0
-        val limit = maxStock.coerceAtMost(MAX_ITEM_QUANTITY)
+        val limit = MenuQuantityRules.quantityLimit(itemStock, stockSize).maxQuantity
         val clampedQuantity = newQuantity.coerceAtMost(limit)
         _cartItems.update { currentCart ->
             val index = currentCart.indexOfFirst {
@@ -255,27 +261,14 @@ class MenuViewModel @Inject constructor(
         _submissionState.value = OrderSubmissionState()
     }
 
-    private fun resolveSelectedSize(item: MenuItem, selectedSize: String): String {
-        if (item.sizes.isEmpty()) return ""
-        if (selectedSize in item.sizes) return selectedSize
-        return if (DEFAULT_STOCK_SIZE in item.sizes) DEFAULT_STOCK_SIZE else item.sizes.keys.first()
-    }
-
-    private fun effectivePrice(item: MenuItem, selectedSize: String): Double {
-        val adjusted = item.price + (item.sizes[selectedSize]?.priceModifier ?: 0.0)
-        return adjusted.takeIf(Double::isFinite)?.coerceAtLeast(0.0) ?: 0.0
-    }
-
     private fun hasEnoughStock(order: Order): Boolean = order.items.all { cartItem ->
         val itemKey = "${cartItem.menuItem.categoryName}/${cartItem.menuItem.id}"
         val knownStock = inventoryStock.value[itemKey] ?: return@all true
-        val sizeKey = cartItem.selectedSize.ifEmpty { DEFAULT_STOCK_SIZE }
+        val sizeKey = cartItem.selectedSize.ifEmpty { MenuQuantityRules.DEFAULT_STOCK_SIZE }
         (knownStock[sizeKey] ?: 0) >= cartItem.quantity
     }
 
     private companion object {
-        const val MAX_ITEM_QUANTITY = 99
         const val MAX_CUSTOMER_NAME_LENGTH = 80
-        const val DEFAULT_STOCK_SIZE = "Medium"
     }
 }

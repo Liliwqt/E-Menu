@@ -1,5 +1,6 @@
 package com.example.androidkiosk.ui.menu.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -13,6 +14,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +67,7 @@ import com.example.androidkiosk.R
 import com.example.androidkiosk.model.Order
 import com.example.androidkiosk.model.PaymentMethod
 import com.example.androidkiosk.ui.animation.MotionTokens
+import com.example.androidkiosk.ui.menu.CartPresentation
 import com.example.androidkiosk.ui.theme.LocalBackgroundTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -345,22 +349,17 @@ fun QRPaymentOverlay(
 ) {
     var isVisible by remember { mutableStateOf(false) }
     var actionPending by remember(order.id) { mutableStateOf(false) }
+    var donePending by remember(order.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { isVisible = true }
 
-    LaunchedEffect(isComplete) {
-        if (isComplete) {
-            delay(1500)
-            isVisible = false
-            delay(250)
-            onDismiss()
-        }
-    }
-
     LaunchedEffect(isSubmitting, isComplete, errorMessage) {
         if (!isSubmitting && !isComplete && errorMessage != null) actionPending = false
     }
+
+    // A completed order waits for the customer to press Done; system back must not dismiss it.
+    BackHandler(enabled = isComplete) { }
 
     fun reportPaidOnce() {
         if (actionPending || isSubmitting || isComplete) return
@@ -374,6 +373,12 @@ fun QRPaymentOverlay(
             delay(250)
             onDismiss()
         }
+    }
+
+    fun doneOnce() {
+        if (donePending) return
+        donePending = true
+        animatedDismiss()
     }
 
     Box(
@@ -473,7 +478,8 @@ fun QRPaymentOverlay(
                                 Column(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .fillMaxWidth(),
+                                        .fillMaxWidth()
+                                        .verticalScroll(rememberScrollState()),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
@@ -485,11 +491,35 @@ fun QRPaymentOverlay(
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
-                                        text = "Your payment was reported and is awaiting staff verification.",
+                                        text = "Order #${order.orderNumber}",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = qrTheme.primaryTextColor
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Amount to Pay ${CartPresentation.formatPrice(order.total)}",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = qrTheme.accentColor
+                                    )
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    Text(
+                                        text = "Your payment was reported. Staff will verify your payment report before serving your order.",
                                         style = MaterialTheme.typography.bodyLarge,
                                         textAlign = TextAlign.Center,
                                         color = qrTheme.secondaryTextColor
                                     )
+                                    Spacer(modifier = Modifier.height(20.dp))
+                                    Button(
+                                        onClick = { doneOnce() },
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.85f)
+                                            .height(52.dp),
+                                        shape = MaterialTheme.shapes.large
+                                    ) {
+                                        Text("Done / Next customer", fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
 
@@ -645,22 +675,17 @@ fun CounterPaymentOverlay(
 ) {
     var isVisible by remember { mutableStateOf(false) }
     var actionPending by remember(order.id) { mutableStateOf(false) }
+    var donePending by remember(order.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { isVisible = true }
 
-    LaunchedEffect(isComplete) {
-        if (isComplete) {
-            delay(1500)
-            isVisible = false
-            delay(250)
-            onDismiss()
-        }
-    }
-
     LaunchedEffect(isSubmitting, isComplete, errorMessage) {
         if (!isSubmitting && !isComplete && errorMessage != null) actionPending = false
     }
+
+    // A completed order waits for the customer to press Done; system back must not dismiss it.
+    BackHandler(enabled = isComplete) { }
 
     fun submitOnce() {
         if (actionPending || isSubmitting || isComplete) return
@@ -674,6 +699,12 @@ fun CounterPaymentOverlay(
             delay(250)
             onDismiss()
         }
+    }
+
+    fun doneOnce() {
+        if (donePending) return
+        donePending = true
+        animatedDismiss()
     }
 
     Box(
@@ -813,12 +844,36 @@ fun CounterPaymentOverlay(
                         Spacer(modifier = Modifier.height(16.dp))
 
                         when {
-                            isComplete -> Text(
-                                text = "Order submitted. Please proceed to the counter.",
-                                style = MaterialTheme.typography.bodyLarge,
-                                textAlign = TextAlign.Center,
-                                color = Color(0xFF4CAF50)
-                            )
+                            isComplete -> Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .verticalScroll(rememberScrollState()),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Order submitted. Please proceed to the counter and pay with cash or card.",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    textAlign = TextAlign.Center,
+                                    color = Color(0xFF4CAF50)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "Show this order number to the staff: #${order.orderNumber}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center,
+                                    color = counterTheme.secondaryTextColor
+                                )
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Button(
+                                    onClick = { doneOnce() },
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.85f)
+                                        .height(52.dp),
+                                    shape = MaterialTheme.shapes.large
+                                ) {
+                                    Text("Done / Next customer", fontWeight = FontWeight.Bold)
+                                }
+                            }
                             isSubmitting -> CircularProgressIndicator(
                                 color = counterTheme.accentColor
                             )
