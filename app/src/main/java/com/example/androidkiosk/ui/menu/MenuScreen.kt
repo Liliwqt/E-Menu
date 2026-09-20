@@ -172,7 +172,10 @@ fun MenuScreen(
     // Secret corner tap state: 5 taps in top-right corner within 3 seconds
     var cornerTapTimestamps by remember { mutableStateOf(listOf<Long>()) }
 
-    // Programmatically control screen orientation based on selected UI mode
+    // Programmatically control screen orientation based on selected UI mode.
+    // The native menu is the ONLY surface that wants landscape; the two WebView surfaces
+    // (setup/registration and the PIN-unlocked admin panel) are portrait portals, which is
+    // also the manifest default (android:screenOrientation="portrait").
     val activity = LocalActivity.current
     DisposableEffect(selectedUIMode) {
         val orientation = if (selectedUIMode == UIMode.PORTRAIT)
@@ -181,8 +184,12 @@ fun MenuScreen(
             ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         activity?.requestedOrientation = orientation
         onDispose {
-            // Restore landscape when leaving the screen entirely
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            // Leaving the native menu lands on a WebView surface, so hand the window back to
+            // portrait. This used to force LANDSCAPE, which made the admin panel open sideways
+            // when unlocked and left the orientation landscape on the way back out.
+            // NOTE: this also runs when selectedUIMode *changes*; the new effect body below
+            // then applies the new mode, so the final value is still correct.
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
 
