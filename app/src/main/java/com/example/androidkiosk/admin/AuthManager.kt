@@ -15,20 +15,20 @@ import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
-enum class KioskRegistrationStatus {
+enum class DeviceRegistrationStatus {
     AUTHENTICATING,
     PENDING_REGISTRATION,
     AUTHORIZED,
     ERROR
 }
 
-data class KioskAuthorizationState(
+data class DeviceAuthorizationState(
     val uid: String? = null,
-    val status: KioskRegistrationStatus = KioskRegistrationStatus.AUTHENTICATING,
+    val status: DeviceRegistrationStatus = DeviceRegistrationStatus.AUTHENTICATING,
     val errorMessage: String? = null
 ) {
     val isAuthorized: Boolean
-        get() = status == KioskRegistrationStatus.AUTHORIZED
+        get() = status == DeviceRegistrationStatus.AUTHORIZED
 }
 
 /**
@@ -42,8 +42,8 @@ class AuthManager @Inject constructor(
     private val database: FirebaseDatabase,
     private val branchPathProvider: BranchPathProvider
 ) {
-    private val _authorizationState = MutableStateFlow(KioskAuthorizationState())
-    val authorizationState: StateFlow<KioskAuthorizationState> = _authorizationState.asStateFlow()
+    private val _authorizationState = MutableStateFlow(DeviceAuthorizationState())
+    val authorizationState: StateFlow<DeviceAuthorizationState> = _authorizationState.asStateFlow()
 
     val userId: String?
         get() = firebaseAuth.currentUser?.uid
@@ -64,7 +64,7 @@ class AuthManager @Inject constructor(
             return
         }
 
-        _authorizationState.value = KioskAuthorizationState()
+        _authorizationState.value = DeviceAuthorizationState()
         try {
             firebaseAuth.signInAnonymously().await()
             firebaseAuth.currentUser?.uid?.let { uid ->
@@ -72,8 +72,8 @@ class AuthManager @Inject constructor(
                 probeAuthorization(uid)
             }
         } catch (error: Exception) {
-            _authorizationState.value = KioskAuthorizationState(
-                status = KioskRegistrationStatus.ERROR,
+            _authorizationState.value = DeviceAuthorizationState(
+                status = DeviceRegistrationStatus.ERROR,
                 errorMessage = "Unable to authenticate this device. Check the network and retry."
             )
             Timber.e(error, "Anonymous kiosk authentication failed")
@@ -100,13 +100,13 @@ class AuthManager @Inject constructor(
                 }
             }
         } catch (error: Exception) {
-            Timber.w(error, "Kiosk enrollment lookup failed")
+            Timber.w(error, "Device enrollment lookup failed")
         }
     }
 
     private fun observeRegistration(user: FirebaseUser?) {
         if (user == null) {
-            _authorizationState.value = KioskAuthorizationState()
+            _authorizationState.value = DeviceAuthorizationState()
             return
         }
 
@@ -114,14 +114,14 @@ class AuthManager @Inject constructor(
     }
 
     private fun probeAuthorization(uid: String) {
-        _authorizationState.value = KioskAuthorizationState(
+        _authorizationState.value = DeviceAuthorizationState(
             uid = uid,
-            status = KioskRegistrationStatus.AUTHENTICATING
+            status = DeviceRegistrationStatus.AUTHENTICATING
         )
         if (!branchPathProvider.isConfigured) {
-            _authorizationState.value = KioskAuthorizationState(
+            _authorizationState.value = DeviceAuthorizationState(
                 uid = uid,
-                status = KioskRegistrationStatus.PENDING_REGISTRATION,
+                status = DeviceRegistrationStatus.PENDING_REGISTRATION,
                 errorMessage = "This device has not been assigned to a company branch yet."
             )
             return
@@ -129,15 +129,15 @@ class AuthManager @Inject constructor(
         val reference = database.getReference("${branchPathProvider.branchPath}/appSettings")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                _authorizationState.value = KioskAuthorizationState(
+                _authorizationState.value = DeviceAuthorizationState(
                     uid = uid,
-                    status = KioskRegistrationStatus.AUTHORIZED
+                    status = DeviceRegistrationStatus.AUTHORIZED
                 )
             }
 
             override fun onCancelled(error: DatabaseError) {
                 publishProbeFailure(uid, error)
-                Timber.e(error.toException(), "Kiosk registration listener cancelled")
+                Timber.e(error.toException(), "Device registration listener cancelled")
             }
         }
         reference.addListenerForSingleValueEvent(listener)
@@ -146,19 +146,19 @@ class AuthManager @Inject constructor(
     /** Called when a protected listener or write is rejected after a UID was previously allowed. */
     fun reportAuthorizationDenied() {
         val uid = firebaseAuth.currentUser?.uid ?: return
-        _authorizationState.value = KioskAuthorizationState(
+        _authorizationState.value = DeviceAuthorizationState(
             uid = uid,
-            status = KioskRegistrationStatus.PENDING_REGISTRATION
+            status = DeviceRegistrationStatus.PENDING_REGISTRATION
         )
     }
 
     private fun publishProbeFailure(uid: String, error: DatabaseError) {
         _authorizationState.value = if (error.code == DatabaseError.PERMISSION_DENIED) {
-            KioskAuthorizationState(uid, KioskRegistrationStatus.PENDING_REGISTRATION)
+            DeviceAuthorizationState(uid, DeviceRegistrationStatus.PENDING_REGISTRATION)
         } else {
-            KioskAuthorizationState(
+            DeviceAuthorizationState(
                 uid = uid,
-                status = KioskRegistrationStatus.ERROR,
+                status = DeviceRegistrationStatus.ERROR,
                 errorMessage = "Unable to verify device authorization. Check the network and retry."
             )
         }

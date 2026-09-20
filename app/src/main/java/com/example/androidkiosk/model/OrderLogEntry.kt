@@ -47,10 +47,10 @@ data class OrderLogEntry(
             timestamp = ServerValue.TIMESTAMP,
             inventoryProcessed = true,
             inventoryProcessedAt = ServerValue.TIMESTAMP,
-            orderSource = ANDROID_KIOSK_SOURCE
+            orderSource = ANDROID_DEVICE_SOURCE
         )
 
-        private const val ANDROID_KIOSK_SOURCE = "android_kiosk"
+        private const val ANDROID_DEVICE_SOURCE = "android_kiosk"
     }
 }
 

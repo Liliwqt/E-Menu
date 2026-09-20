@@ -86,7 +86,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.activity.compose.LocalActivity
 import com.example.androidkiosk.R
 import com.example.androidkiosk.admin.PinManager
-import com.example.androidkiosk.admin.KioskRegistrationStatus
+import com.example.androidkiosk.admin.DeviceRegistrationStatus
 import com.example.androidkiosk.admin.UnlockMethod
 import com.example.androidkiosk.ui.theme.LocalBackgroundImageUrl
 import com.example.androidkiosk.ui.theme.LocalBackgroundTheme
@@ -104,7 +104,7 @@ import com.example.androidkiosk.ui.menu.components.ErrorScreen
 import com.example.androidkiosk.ui.menu.components.GlassCard
 import com.example.androidkiosk.ui.menu.components.ItemDetailOverlay
 import com.example.androidkiosk.ui.menu.components.LoadingScreen
-import com.example.androidkiosk.ui.menu.components.KioskAuthorizationScreen
+import com.example.androidkiosk.ui.menu.components.DeviceRegistrationScreen
 import com.example.androidkiosk.ui.menu.components.MenuItemCard
 import com.example.androidkiosk.ui.menu.components.MenuModeSelectionScreen
 import com.example.androidkiosk.ui.menu.components.PaymentMethodOverlay
@@ -265,11 +265,11 @@ fun MenuScreen(
                 }
             ) { paddingValues ->
                 when {
-                    !isAuthorized -> KioskAuthorizationScreen(
+                    !isAuthorized -> DeviceRegistrationScreen(
                         uid = authorizationState.uid,
                         message = when (authorizationState.status) {
-                            KioskRegistrationStatus.ERROR -> authorizationState.errorMessage
-                            KioskRegistrationStatus.AUTHENTICATING -> "Checking device registration…"
+                            DeviceRegistrationStatus.ERROR -> authorizationState.errorMessage
+                            DeviceRegistrationStatus.AUTHENTICATING -> "Checking device registration…"
                             else -> null
                         },
                         onRetry = viewModel::retryAuthorization

@@ -1,8 +1,8 @@
 package com.example.androidkiosk.ui.menu
 
 import com.example.androidkiosk.admin.AuthManager
-import com.example.androidkiosk.admin.KioskAuthorizationState
-import com.example.androidkiosk.admin.KioskRegistrationStatus
+import com.example.androidkiosk.admin.DeviceAuthorizationState
+import com.example.androidkiosk.admin.DeviceRegistrationStatus
 import com.example.androidkiosk.domain.repository.AppSettingsRepository
 import com.example.androidkiosk.domain.repository.MenuRepository
 import com.example.androidkiosk.domain.repository.OrderRepository
@@ -38,7 +38,7 @@ class MenuViewModelTest {
     private lateinit var orderRepository: RecordingOrderRepository
     private lateinit var settingsRepository: AppSettingsRepository
     private lateinit var authManager: AuthManager
-    private lateinit var authorizationState: kotlinx.coroutines.flow.MutableStateFlow<KioskAuthorizationState>
+    private lateinit var authorizationState: kotlinx.coroutines.flow.MutableStateFlow<DeviceAuthorizationState>
 
     private val sizedItem = MenuItem(
         id = "coffee",
@@ -59,7 +59,7 @@ class MenuViewModelTest {
         settingsRepository = mockk(relaxed = true)
         authManager = mockk(relaxed = true)
         authorizationState = kotlinx.coroutines.flow.MutableStateFlow(
-            KioskAuthorizationState("registered-test-uid", KioskRegistrationStatus.AUTHORIZED)
+            DeviceAuthorizationState("registered-test-uid", DeviceRegistrationStatus.AUTHORIZED)
         )
         every { authManager.authorizationState } returns authorizationState
         every { menuRepository.observeCategories() } returns flowOf(
@@ -200,9 +200,9 @@ class MenuViewModelTest {
         advanceUntilIdle()
         viewModel.addToCartWithQuantity(sizedItem, 1, "Medium")
         val order = viewModel.confirmOrder("Guest")
-        authorizationState.value = KioskAuthorizationState(
+        authorizationState.value = DeviceAuthorizationState(
             uid = "registered-test-uid",
-            status = KioskRegistrationStatus.PENDING_REGISTRATION
+            status = DeviceRegistrationStatus.PENDING_REGISTRATION
         )
 
         viewModel.submitOrder(order, PaymentMethod.COUNTER, PaymentStatus.PAY_AT_COUNTER)

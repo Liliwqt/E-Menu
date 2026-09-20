@@ -14,7 +14,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.example.androidkiosk.model.MenuItem
 import com.example.androidkiosk.model.Order
 import com.example.androidkiosk.model.SizeOption
-import com.example.androidkiosk.ui.theme.AndroidKioskTheme
+import com.example.androidkiosk.ui.theme.AndroidDeviceTheme
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
@@ -26,14 +26,14 @@ import java.io.File
  * submits an order. Screenshots land in the app's external files directory and are pulled with
  * `adb pull` for the handover record.
  */
-class KioskUxScreenshotsTest {
+class DeviceUxScreenshotsTest {
     @get:Rule
     val composeRule = createComposeRule()
 
     private val outputDir: File by lazy {
         val dir = File(
             InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),
-            "kiosk-ux"
+            "device-ux"
         )
         dir.mkdirs()
         dir
@@ -69,7 +69,7 @@ class KioskUxScreenshotsTest {
     /** Applies the real app theme AND a themed background so captures match the running app. */
     @Composable
     private fun Harness(content: @Composable () -> Unit) {
-        AndroidKioskTheme(backgroundThemeName = "Dark") {
+        AndroidDeviceTheme(backgroundThemeName = "Dark") {
             Surface(
                 modifier = Modifier.fillMaxSize(),
                 color = MaterialTheme.colorScheme.background
@@ -135,7 +135,7 @@ class KioskUxScreenshotsTest {
     fun captureDeviceRegistrationScreen() {
         composeRule.setContent {
             Harness {
-                KioskAuthorizationScreen(
+                DeviceRegistrationScreen(
                     uid = "aBcD1234eFgH5678iJkL",
                     message = null,
                     onRetry = {}

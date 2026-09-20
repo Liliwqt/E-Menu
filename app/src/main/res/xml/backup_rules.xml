@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
     Security hardening: Exclude all app data from cloud backup.
-    The kiosk stores PIN throttle state and cached menu items —
+    The device stores PIN throttle state and cached menu items —
     neither should be backed up to Google Drive.
 
     Note: android:allowBackup="false" is already set in the manifest,

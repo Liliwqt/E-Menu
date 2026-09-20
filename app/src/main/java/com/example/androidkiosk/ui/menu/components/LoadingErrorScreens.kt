@@ -22,7 +22,7 @@ import com.example.androidkiosk.ui.animation.ShimmerMenuSkeleton
 import com.example.androidkiosk.ui.theme.LocalBackgroundTheme
 
 @Composable
-fun KioskAuthorizationScreen(
+fun DeviceRegistrationScreen(
     uid: String?,
     message: String?,
     onRetry: () -> Unit

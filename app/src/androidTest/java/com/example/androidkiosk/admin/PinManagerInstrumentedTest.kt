@@ -16,7 +16,7 @@ class PinManagerInstrumentedTest {
 
     @Before
     fun clearState() {
-        context.getSharedPreferences("kiosk_security_state", 0).edit().clear().commit()
+        context.getSharedPreferences("device_security_state", 0).edit().clear().commit()
     }
 
     @After

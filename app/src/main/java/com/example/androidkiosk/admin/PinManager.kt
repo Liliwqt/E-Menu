@@ -92,7 +92,7 @@ class PinManager @Inject constructor(
         const val MAX_ATTEMPTS = 3
         const val LOCKOUT_DURATION_MS = 60_000L
 
-        private const val PREFS_FILE = "kiosk_security_state"
+        private const val PREFS_FILE = "device_security_state"
         private const val KEY_FAILED_ATTEMPTS = "failed_attempts"
         private const val KEY_LOCKOUT_UNTIL = "lockout_until"
     }

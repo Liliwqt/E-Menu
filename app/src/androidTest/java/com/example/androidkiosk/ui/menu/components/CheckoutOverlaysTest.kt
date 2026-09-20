@@ -128,7 +128,7 @@ class CheckoutOverlaysTest {
         var retries = 0
         composeRule.setContent {
             MaterialTheme {
-                KioskAuthorizationScreen(
+                DeviceRegistrationScreen(
                     uid = "new-anonymous-kiosk-uid",
                     message = null,
                     onRetry = { retries++ }
@@ -145,7 +145,7 @@ class CheckoutOverlaysTest {
     fun registrationScreenUsesDeviceWording() {
         composeRule.setContent {
             MaterialTheme {
-                KioskAuthorizationScreen(
+                DeviceRegistrationScreen(
                     uid = "uid",
                     message = null,
                     onRetry = {}

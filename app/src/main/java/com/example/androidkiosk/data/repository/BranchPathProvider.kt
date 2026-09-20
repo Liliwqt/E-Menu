@@ -29,7 +29,7 @@ class BranchPathProvider @Inject constructor(
     val branchPath: String
         get() {
             check(companyId.isNotBlank() && branchId.isNotBlank()) {
-                "Kiosk branch is not configured. Provision companyId and branchId before ordering."
+                "Device is not configured. Provision companyId and branchId before ordering."
             }
             return "$companyId/branches/$branchId"
         }
@@ -44,7 +44,7 @@ class BranchPathProvider @Inject constructor(
     }
 
     private companion object {
-        const val PREFERENCES = "kiosk_branch_configuration"
+        const val PREFERENCES = "device_branch_configuration"
         const val KEY_COMPANY_ID = "companyId"
         const val KEY_BRANCH_ID = "branchId"
         val COMPANY_ID_PATTERN = Regex("company-[a-z0-9-]+")

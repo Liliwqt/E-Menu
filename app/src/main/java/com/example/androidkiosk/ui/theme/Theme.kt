@@ -18,7 +18,7 @@ val LocalBackgroundTheme = staticCompositionLocalOf<BackgroundTheme> { Backgroun
 val LocalReducedMotion = staticCompositionLocalOf { false }
 
 @Composable
-fun AndroidKioskTheme(
+fun AndroidDeviceTheme(
     backgroundImageUrl: String? = null,
     backgroundThemeName: String = "Dark",
     reducedMotion: Boolean = false,

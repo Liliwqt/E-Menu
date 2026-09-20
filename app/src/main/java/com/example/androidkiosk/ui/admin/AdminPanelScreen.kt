@@ -18,8 +18,8 @@ import androidx.compose.ui.Modifier
 @OptIn(ExperimentalMaterial3Api::class)
 fun AdminPanelScreen(
     panelUrl: String,
-    onReturnToKiosk: () -> Unit,
-    onEnterKioskMode: (companyId: String, branchId: String) -> Unit = { _, _ -> Unit }
+    onReturnToMenu: () -> Unit,
+    onEnterMenuMode: (companyId: String, branchId: String) -> Unit = { _, _ -> Unit }
 ) {
     val webViewHolder = remember { WebViewBackHelper() }
 
@@ -27,7 +27,7 @@ fun AdminPanelScreen(
         if (webViewHolder.goBack()) {
             // handled: navigated one step back inside the panel
         } else {
-            onReturnToKiosk()
+            onReturnToMenu()
         }
     }
 
@@ -36,7 +36,7 @@ fun AdminPanelScreen(
             TopAppBar(
                 title = { Text("E-Menu Admin Panel") },
                 actions = {
-                    TextButton(onClick = onReturnToKiosk) {
+                    TextButton(onClick = onReturnToMenu) {
                         Text("Return to menu")
                     }
                 }
@@ -48,10 +48,10 @@ fun AdminPanelScreen(
                 .fillMaxSize()
                 .padding(contentPadding)
         ) {
-            KioskWebView(
+            DeviceWebView(
                 url = panelUrl,
                 injectBridge = true,
-                onEnterKioskMode = onEnterKioskMode,
+                onEnterMenuMode = onEnterMenuMode,
                 onWebViewCreated = { webViewHolder.attach(it) },
                 modifier = Modifier.fillMaxSize()
             )

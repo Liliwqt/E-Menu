@@ -43,21 +43,21 @@ import timber.log.Timber
  *  - the new first‑run shell (registration → setup → dashboard).
  *
  * It applies the strict navigation policy, disables downloads/file access,
- * and injects the [KioskWebBridge] so the web app can request kiosk mode.
+ * and injects the [DeviceWebBridge] so the web app can request menu mode.
  *
  * @param url initial URL to load.
  * @param injectBridge when true, exposes `window.AndroidKiosk` to page scripts.
- * @param onEnterKioskMode invoked when the web app asks to enter kiosk mode,
+ * @param onEnterMenuMode invoked when the web app asks to enter menu mode,
  *   receiving the workspace company/branch IDs handed over by the web app.
  * @param onWebViewCreated optional callback giving the hosting screen a handle
  *   to the active WebView (used for back-navigation).
  */
 @Composable
-fun KioskWebView(
+fun DeviceWebView(
     url: String,
     modifier: Modifier = Modifier,
     injectBridge: Boolean = true,
-    onEnterKioskMode: (companyId: String, branchId: String) -> Unit = { _, _ -> },
+    onEnterMenuMode: (companyId: String, branchId: String) -> Unit = { _, _ -> },
     onWebViewCreated: (WebView) -> Unit = {}
 ) {
     var webView by remember { mutableStateOf<WebView?>(null) }
@@ -114,8 +114,8 @@ fun KioskWebView(
                     )
                     if (injectBridge) {
                         created.addJavascriptInterface(
-                            KioskWebBridge(
-                                onEnterKioskMode = onEnterKioskMode,
+                            DeviceWebBridge(
+                                onEnterMenuMode = onEnterMenuMode,
                                 deviceUidProvider = {
                                     // Read the current anonymous Firebase UID at
                                     // call time so it's fresh after sign-in.
@@ -251,7 +251,7 @@ private fun configurePanelWebView(
 
         override fun onPageFinished(view: WebView, url: String) {
             onLoadingChanged(false)
-            Timber.i("KioskWebView: page finished loading — %s", url)
+            Timber.i("DeviceWebView: page finished loading — %s", url)
         }
 
         override fun onReceivedError(

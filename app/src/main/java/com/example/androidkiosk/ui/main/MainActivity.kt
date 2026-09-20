@@ -19,22 +19,22 @@ import com.example.androidkiosk.admin.UnlockMethod
 import com.example.androidkiosk.BuildConfig
 import com.example.androidkiosk.data.repository.BranchPathProvider
 import com.example.androidkiosk.ui.admin.AdminPanelScreen
-import com.example.androidkiosk.ui.admin.KioskWebView
+import com.example.androidkiosk.ui.admin.DeviceWebView
 import com.example.androidkiosk.ui.menu.MenuScreen
 import com.example.androidkiosk.ui.menu.MenuViewModel
-import com.example.androidkiosk.ui.theme.AndroidKioskTheme
+import com.example.androidkiosk.ui.theme.AndroidDeviceTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import timber.log.Timber
 import javax.inject.Inject
 
 /** Which full-screen surface the app is currently showing. */
-private enum class KioskSurface {
+private enum class AppSurface {
     /** Embedded web app (registration → setup → dashboard) when the branch is not provisioned. */
     SETUP_WEB,
 
     /** Native menu. */
-    KIOSK_MENU,
+    MENU,
 
     /** PIN-unlocked dashboard (embedded web app, admin mode). */
     ADMIN_WEB
@@ -55,23 +55,23 @@ class MainActivity : ComponentActivity() {
     private val unlockMethod = MutableStateFlow(UnlockMethod.ADMIN_BUTTON)
 
     /**
-     * Current surface: setup web by default, native kiosk menu if already provisioned.
+     * Current surface: setup web by default, native menu if already provisioned.
      * NOTE: this cannot read [branchPathProvider] in a field initializer — Hilt injects
      * the field in onCreate() (after construction), so a field initializer would hit an
      * uninitialized lateinit var and crash the app on launch. Initialized in onCreate().
      */
-    private val surface = MutableStateFlow(KioskSurface.SETUP_WEB)
+    private val surface = MutableStateFlow(AppSurface.SETUP_WEB)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Hilt has now injected all @Inject fields. Decide the initial surface:
-        // an already-provisioned device boots straight into the locked kiosk menu;
+        // an already-provisioned device boots straight into the native menu;
         // a fresh device starts in the embedded web app (registration → setup).
         surface.value = if (branchPathProvider.isConfigured) {
-            KioskSurface.KIOSK_MENU
+            AppSurface.MENU
         } else {
-            KioskSurface.SETUP_WEB
+            AppSurface.SETUP_WEB
         }
         Timber.i(
             "Surface decision — isConfigured=%s company=%s branch=%s → %s",
@@ -82,7 +82,7 @@ class MainActivity : ComponentActivity() {
         )
 
         // Window configuration — display cutout only. Deliberately NOT a locked
-        // kiosk: this app ships to staff phones and shared tablets, so the status
+        // kiosk-style lockdown: this app ships to staff phones and shared tablets, so the status
         // bar, keyguard, volume keys, Back, and screen timeout stay under the
         // device owner's control.
         window.attributes = window.attributes.apply {
@@ -106,7 +106,7 @@ class MainActivity : ComponentActivity() {
             // Determine if reduced motion accessibility setting is enabled
             val reducedMotion = getReducedMotionPreference()
 
-            AndroidKioskTheme(
+            AndroidDeviceTheme(
                 backgroundImageUrl = appSettings.backgroundImage,
                 backgroundThemeName = appSettings.backgroundTheme,
                 reducedMotion = reducedMotion
@@ -116,15 +116,15 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     when (currentSurface) {
-                        KioskSurface.SETUP_WEB -> KioskWebView(
+                        AppSurface.SETUP_WEB -> DeviceWebView(
                             url = BuildConfig.ADMIN_PANEL_URL,
                             injectBridge = true,
-                            onEnterKioskMode = { companyId, branchId -> enterKioskFromWeb(companyId, branchId) }
+                            onEnterMenuMode = { companyId, branchId -> enterMenuFromWeb(companyId, branchId) }
                         )
-                        KioskSurface.ADMIN_WEB -> AdminPanelScreen(
+                        AppSurface.ADMIN_WEB -> AdminPanelScreen(
                             panelUrl = BuildConfig.ADMIN_PANEL_URL,
-                            onReturnToKiosk = ::returnToKiosk,
-                            onEnterKioskMode = { companyId, branchId -> enterKioskFromWeb(companyId, branchId) }
+                            onReturnToMenu = ::returnToMenu,
+                            onEnterMenuMode = { companyId, branchId -> enterMenuFromWeb(companyId, branchId) }
                         )
                         else -> {
                             MenuScreen(
@@ -140,11 +140,11 @@ class MainActivity : ComponentActivity() {
                                     unlockAttemptLogger.logAttempt(method, success = true)
                                     showPinDialog.value = false
                                     isAdminUnlocked.value = true
-                                    surface.value = KioskSurface.ADMIN_WEB
+                                    surface.value = AppSurface.ADMIN_WEB
                                     Timber.i("Admin unlocked device via %s", method.name)
                                 },
                                 onRelockRequest = {
-                                    returnToKiosk()
+                                    returnToMenu()
                                 },
                                 onPinDialogRequest = { method ->
                                     unlockMethod.value = method
@@ -162,20 +162,20 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Called from the embedded web app (setup shell or admin panel) to switch to the native menu. */
-    private fun enterKioskFromWeb(companyId: String, branchId: String) {
+    private fun enterMenuFromWeb(companyId: String, branchId: String) {
         // Provision the native menu to the branch the web workspace selected.
         if (companyId.isNotBlank() && branchId.isNotBlank()) {
             runCatching { branchPathProvider.configure(companyId, branchId) }
-                .onFailure { Timber.w(it, "Failed to provision branch path from web kiosk request") }
+                .onFailure { Timber.w(it, "Failed to provision branch path from web request") }
         }
-        surface.value = KioskSurface.KIOSK_MENU
+        surface.value = AppSurface.MENU
         isAdminUnlocked.value = false
         Timber.i("Entered native menu from web (company=%s branch=%s)", companyId, branchId)
     }
 
     /** Return from the admin panel to the native menu. */
-    private fun returnToKiosk() {
-        surface.value = KioskSurface.KIOSK_MENU
+    private fun returnToMenu() {
+        surface.value = AppSurface.MENU
         isAdminUnlocked.value = false
         Timber.i("Admin panel closed")
     }

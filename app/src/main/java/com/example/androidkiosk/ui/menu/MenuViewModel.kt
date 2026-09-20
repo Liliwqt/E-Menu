@@ -3,7 +3,7 @@ package com.example.androidkiosk.ui.menu
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.androidkiosk.admin.AuthManager
-import com.example.androidkiosk.admin.KioskAuthorizationState
+import com.example.androidkiosk.admin.DeviceAuthorizationState
 import com.example.androidkiosk.domain.repository.AppSettingsRepository
 import com.example.androidkiosk.domain.repository.MenuRepository
 import com.example.androidkiosk.domain.repository.OrderRepository
@@ -42,7 +42,7 @@ class MenuViewModel @Inject constructor(
     private val authManager: AuthManager
 ) : ViewModel() {
 
-    val authorizationState: StateFlow<KioskAuthorizationState> = authManager.authorizationState
+    val authorizationState: StateFlow<DeviceAuthorizationState> = authManager.authorizationState
 
     val categories: StateFlow<List<CategoryWithItems>> = menuRepository
         .observeCategories()
