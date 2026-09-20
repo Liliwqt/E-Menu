@@ -81,7 +81,7 @@ class MenuRepositoryImpl @Inject constructor(
     }
 
     override suspend fun refresh() {
-        check(authManager.authorizationState.value.isAuthorized) { "Kiosk UID is not registered" }
+        check(authManager.authorizationState.value.isAuthorized) { "Device is not registered" }
         val snapshot = database.getReference("${branchPathProvider.branchPath}/categories").get().await()
         replaceCacheFrom(snapshot)
         ensureFirebaseSync()

@@ -141,6 +141,21 @@ class CheckoutOverlaysTest {
         composeRule.runOnIdle { assertEquals(1, retries) }
     }
 
+    @Test
+    fun registrationScreenUsesDeviceWording() {
+        composeRule.setContent {
+            MaterialTheme {
+                KioskAuthorizationScreen(
+                    uid = "uid",
+                    message = null,
+                    onRetry = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Device registration required").assertExists()
+    }
+
     // ── Order confirmation ──────────────────────────────────────────────
 
     @Test

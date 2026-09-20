@@ -34,7 +34,7 @@ fun KioskAuthorizationScreen(
             modifier = Modifier.padding(40.dp)
         ) {
             Text(
-                text = "Kiosk registration required",
+                text = "Device registration required",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = theme.primaryTextColor,
@@ -42,7 +42,7 @@ fun KioskAuthorizationScreen(
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = message ?: "Ask a Firebase administrator to authorize this kiosk for its assigned branch.",
+                text = message ?: "Ask a Firebase administrator to authorize this device for its assigned branch.",
                 color = theme.secondaryTextColor,
                 textAlign = TextAlign.Center
             )

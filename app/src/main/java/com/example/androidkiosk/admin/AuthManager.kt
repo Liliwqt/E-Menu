@@ -74,7 +74,7 @@ class AuthManager @Inject constructor(
         } catch (error: Exception) {
             _authorizationState.value = KioskAuthorizationState(
                 status = KioskRegistrationStatus.ERROR,
-                errorMessage = "Unable to authenticate this kiosk. Check the network and retry."
+                errorMessage = "Unable to authenticate this device. Check the network and retry."
             )
             Timber.e(error, "Anonymous kiosk authentication failed")
         }
@@ -122,7 +122,7 @@ class AuthManager @Inject constructor(
             _authorizationState.value = KioskAuthorizationState(
                 uid = uid,
                 status = KioskRegistrationStatus.PENDING_REGISTRATION,
-                errorMessage = "This kiosk has not been assigned to a company branch yet."
+                errorMessage = "This device has not been assigned to a company branch yet."
             )
             return
         }
@@ -159,7 +159,7 @@ class AuthManager @Inject constructor(
             KioskAuthorizationState(
                 uid = uid,
                 status = KioskRegistrationStatus.ERROR,
-                errorMessage = "Unable to verify kiosk authorization. Check the network and retry."
+                errorMessage = "Unable to verify device authorization. Check the network and retry."
             )
         }
     }

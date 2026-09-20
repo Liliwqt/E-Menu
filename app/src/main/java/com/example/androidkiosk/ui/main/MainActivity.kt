@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
 
     /** Whether the admin panel is currently open (unlocked by PIN). */
     private val isAdminUnlocked = MutableStateFlow(false)
-    private val unlockMethod = MutableStateFlow(UnlockMethod.CORNER_TAP)
+    private val unlockMethod = MutableStateFlow(UnlockMethod.ADMIN_BUTTON)
 
     /**
      * Current surface: setup web by default, native kiosk menu if already provisioned.

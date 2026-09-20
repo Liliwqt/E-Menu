@@ -1,6 +1,11 @@
 package com.example.androidkiosk.ui.menu.components
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -61,10 +66,23 @@ class KioskUxScreenshotsTest {
         }
     }
 
+    /** Applies the real app theme AND a themed background so captures match the running app. */
+    @Composable
+    private fun Harness(content: @Composable () -> Unit) {
+        AndroidKioskTheme(backgroundThemeName = "Dark") {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                content()
+            }
+        }
+    }
+
     @Test
     fun captureItemDetailWithSizesAndStock() {
         composeRule.setContent {
-            AndroidKioskTheme(backgroundThemeName = "Dark") {
+            Harness {
                 ItemDetailOverlay(
                     item = sizedItem,
                     stockBySize = mapOf("Medium" to 2, "Large" to 0),
@@ -85,7 +103,7 @@ class KioskUxScreenshotsTest {
             price = 150.0
         )
         composeRule.setContent {
-            AndroidKioskTheme(backgroundThemeName = "Dark") {
+            Harness {
                 ItemDetailOverlay(
                     item = untracked,
                     stockBySize = null,
@@ -100,7 +118,7 @@ class KioskUxScreenshotsTest {
     @Test
     fun captureQrPaymentConfirmation() {
         composeRule.setContent {
-            AndroidKioskTheme(backgroundThemeName = "Dark") {
+            Harness {
                 QRPaymentOverlay(
                     order = order,
                     isSubmitting = false,
@@ -114,9 +132,23 @@ class KioskUxScreenshotsTest {
     }
 
     @Test
+    fun captureDeviceRegistrationScreen() {
+        composeRule.setContent {
+            Harness {
+                KioskAuthorizationScreen(
+                    uid = "aBcD1234eFgH5678iJkL",
+                    message = null,
+                    onRetry = {}
+                )
+            }
+        }
+        capture("device-registration")
+    }
+
+    @Test
     fun captureCounterPaymentConfirmation() {
         composeRule.setContent {
-            AndroidKioskTheme(backgroundThemeName = "Dark") {
+            Harness {
                 CounterPaymentOverlay(
                     order = order,
                     isSubmitting = false,

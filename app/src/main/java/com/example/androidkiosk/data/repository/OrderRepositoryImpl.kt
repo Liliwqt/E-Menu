@@ -27,7 +27,7 @@ class OrderRepositoryImpl @Inject constructor(
             validateOrder(order)
 
             check(authManager.authorizationState.value.isAuthorized) {
-                "This kiosk UID is not registered"
+                "This device is not registered"
             }
 
             requireNotNull(order.paymentMethod) { "Payment method is required" }

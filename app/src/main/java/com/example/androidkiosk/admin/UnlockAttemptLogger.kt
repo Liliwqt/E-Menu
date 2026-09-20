@@ -22,6 +22,9 @@ class UnlockAttemptLogger @Inject constructor() {
 
 /** How the admin PIN dialog was triggered. */
 enum class UnlockMethod {
+    /** Visible Admin button on the menu. */
+    ADMIN_BUTTON,
+
     /** Secret corner tap (5 taps in top-right corner). */
     CORNER_TAP
 }

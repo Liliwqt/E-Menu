@@ -34,9 +34,10 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Button
@@ -44,6 +45,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -125,7 +128,7 @@ fun MenuScreen(
     viewModel: MenuViewModel,
     showPinDialog: Boolean = false,
     isAdminUnlocked: Boolean = false,
-    unlockMethod: UnlockMethod = UnlockMethod.CORNER_TAP,
+    unlockMethod: UnlockMethod = UnlockMethod.ADMIN_BUTTON,
     pinManager: PinManager? = null,
     onPinDialogDismiss: () -> Unit = {},
     onUnlockSuccess: (UnlockMethod) -> Unit = {},
@@ -266,7 +269,7 @@ fun MenuScreen(
                         uid = authorizationState.uid,
                         message = when (authorizationState.status) {
                             KioskRegistrationStatus.ERROR -> authorizationState.errorMessage
-                            KioskRegistrationStatus.AUTHENTICATING -> "Checking Firebase kiosk registration…"
+                            KioskRegistrationStatus.AUTHENTICATING -> "Checking device registration…"
                             else -> null
                         },
                         onRetry = viewModel::retryAuthorization
@@ -429,7 +432,31 @@ fun MenuScreen(
             )
         }
 
-        // Unlock button (only visible when already unlocked)
+        // Visible admin entry — opens the PIN dialog. The five-corner tap still works as a backup.
+        val anyOverlayOpen = selectedItem != null || showCart || showCheckout || showPaymentMethod ||
+            showQRPayment || showCounterPayment || showPinDialog
+        if (isAuthorized && selectedUIMode != null && !isAdminUnlocked && !anyOverlayOpen) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+            ) {
+                FilledTonalIconButton(
+                    onClick = { onPinDialogRequest(UnlockMethod.ADMIN_BUTTON) },
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = bgTheme.buttonContainerColor,
+                        contentColor = bgTheme.buttonContentColor
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AdminPanelSettings,
+                        contentDescription = "Admin settings"
+                    )
+                }
+            }
+        }
+
+        // Exit control while the admin panel is open.
         if (isAdminUnlocked) {
             Box(
                 modifier = Modifier
@@ -444,9 +471,9 @@ fun MenuScreen(
                     ),
                     shape = RoundedCornerShape(24.dp)
                 ) {
-                    Icon(Icons.Default.Lock, contentDescription = "Lock")
+                    Icon(Icons.Default.Logout, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("LOCK KIOSK")
+                    Text("Exit Admin")
                 }
             }
         }

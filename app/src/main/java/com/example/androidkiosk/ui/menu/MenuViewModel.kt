@@ -217,7 +217,7 @@ class MenuViewModel @Inject constructor(
         if (!authorizationState.value.isAuthorized) {
             _submissionState.value = OrderSubmissionState(
                 orderId = order.id,
-                errorMessage = "This kiosk is not registered. Ask an administrator to authorize its UID."
+                errorMessage = "This device is not registered. Ask an administrator to authorize its UID."
             )
             return
         }

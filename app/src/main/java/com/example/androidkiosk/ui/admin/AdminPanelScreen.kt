@@ -37,7 +37,7 @@ fun AdminPanelScreen(
                 title = { Text("E-Menu Admin Panel") },
                 actions = {
                     TextButton(onClick = onReturnToKiosk) {
-                        Text("Return to kiosk")
+                        Text("Return to menu")
                     }
                 }
             )
