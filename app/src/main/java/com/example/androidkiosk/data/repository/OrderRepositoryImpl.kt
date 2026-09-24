@@ -7,6 +7,13 @@ import com.example.androidkiosk.model.OrderLogEntry
 import com.example.androidkiosk.model.PaymentMethod
 import com.example.androidkiosk.model.PaymentStatus
 import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.ValueEventListener
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import com.google.firebase.database.ServerValue
 import kotlinx.coroutines.tasks.await
 import timber.log.Timber
@@ -22,12 +29,60 @@ class OrderRepositoryImpl @Inject constructor(
     private val branchPathProvider: BranchPathProvider
 ) : OrderRepository {
 
+    private val _subscriptionEndAt = MutableStateFlow<Long?>(null)
+    override val subscriptionEndAt: StateFlow<Long?> = _subscriptionEndAt.asStateFlow()
+    private var entitlementRef: DatabaseReference? = null
+    private var entitlementListener: ValueEventListener? = null
+    private var observationGeneration = 0
+
+    override fun startSubscriptionObservation() {
+        if (!branchPathProvider.isConfigured || entitlementListener != null) return
+        val reference = database.getReference(
+            "billingEntitlements/${branchPathProvider.companyId}/${branchPathProvider.branchId}"
+        )
+        val generation = ++observationGeneration
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (generation != observationGeneration) return
+                _subscriptionEndAt.value = if (
+                    snapshot.child("subscriptionStatus").getValue(String::class.java) in listOf("trialing", "active")
+                ) snapshot.child("periodEndAt").getValue(Long::class.java) ?: 0L else 0L
+            }
+            override fun onCancelled(error: DatabaseError) {
+                if (generation != observationGeneration) return
+                _subscriptionEndAt.value = 0L
+                Timber.e(error.toException(), "Unable to read branch subscription")
+            }
+        }
+        entitlementRef = reference
+        entitlementListener = listener
+        _subscriptionEndAt.value = null
+        reference.addValueEventListener(listener)
+    }
+
+    override fun stopSubscriptionObservation() {
+        observationGeneration++
+        entitlementListener?.let { listener -> entitlementRef?.removeEventListener(listener) }
+        entitlementListener = null
+        entitlementRef = null
+        _subscriptionEndAt.value = null
+    }
+
     override suspend fun submitOrder(order: Order): Result<Unit> {
         return try {
             validateOrder(order)
 
             check(authManager.authorizationState.value.isAuthorized) {
                 "This device is not registered"
+            }
+
+            val entitlement = database.getReference(
+                "billingEntitlements/${branchPathProvider.companyId}/${branchPathProvider.branchId}"
+            ).get().await()
+            val expiresAt = entitlement.child("periodEndAt").getValue(Long::class.java) ?: 0L
+            val planStatus = entitlement.child("subscriptionStatus").getValue(String::class.java)
+            check(planStatus in listOf("trialing", "active") && expiresAt > System.currentTimeMillis()) {
+                "Branch plan expired. Ordering is paused until the owner renews."
             }
 
             requireNotNull(order.paymentMethod) { "Payment method is required" }
@@ -73,7 +128,9 @@ class OrderRepositoryImpl @Inject constructor(
             Timber.i("Order %s submitted and inventory updated", order.orderNumber)
             Result.success(Unit)
         } catch (e: Exception) {
-            if (e.message?.contains("permission denied", ignoreCase = true) == true) {
+            if (e.message?.contains("permission denied", ignoreCase = true) == true &&
+                (_subscriptionEndAt.value ?: 0L) > System.currentTimeMillis()
+            ) {
                 authManager.reportAuthorizationDenied()
             }
             Timber.e(e, "Failed to submit order %s", order.orderNumber)

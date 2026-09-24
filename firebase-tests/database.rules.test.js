@@ -38,6 +38,20 @@ beforeEach(async () => {
   await testEnv.withSecurityRulesDisabled(async (context) => {
     const db = context.database();
     await set(ref(db), {
+      billingEntitlements: {
+        [companyId]: {
+          [branchId]: {
+            companyId, branchId, ownerUid: managerUid, plan: 'basic',
+            subscriptionStatus: 'active', periodStartAt: Date.now(),
+            periodEndAt: Date.now() + 86400000,
+          },
+          [otherBranchId]: {
+            companyId, branchId: otherBranchId, ownerUid: managerUid, plan: 'basic',
+            subscriptionStatus: 'active', periodStartAt: Date.now(),
+            periodEndAt: Date.now() + 86400000,
+          },
+        },
+      },
       branch2: {
         categories: { Drinks: { coffee: { name: "Coffee", price: 100 } } },
         appSettings: { backgroundTheme: "Dark" },
@@ -232,6 +246,17 @@ test("two-step workspace onboarding mirrors the app writes", async () => {
     ownerUid: "new-owner",
     plan: "free",
   }));
+  // A one-time Starter entitlement is created after the profile and before
+  // any operational writes. A second client write to it must be refused.
+  const entitlementPath = `billingEntitlements/${co}/${br}`;
+  await assertSucceeds(set(ref(owner, entitlementPath), {
+    companyId: co, branchId: br, ownerUid: "new-owner", plan: "starter",
+    subscriptionStatus: "trialing",
+    periodStartAt: { ".sv": "timestamp" },
+    trialStartedAt: { ".sv": "timestamp" },
+    periodEndAt: Date.now() + 14 * 86400000,
+  }));
+  await assertFails(update(ref(owner, entitlementPath), { plan: "premium" }));
   // Step 1c: extended branchProfile fields, one at a time (app behavior)
   const extended = {
     businessName: "Touch Co",
@@ -268,8 +293,8 @@ test("two-step workspace onboarding mirrors the app writes", async () => {
     operatingHours: "9:00 AM - 9:00 PM",
     backgroundTheme: "Default",
   }));
-  await assertSucceeds(set(ref(owner, `${co}/branches/${br}/users`), {
-    "new-owner": { uid: "new-owner", email: "owner@example.com", role: "owner" },
+  await assertSucceeds(set(ref(owner, `${co}/branches/${br}/users/new-owner`), {
+    uid: "new-owner", email: "owner@example.com", role: "owner",
   }));
 
   // Step 3: the FULL workspace object must be persisted under users/$uid/workspace.
@@ -552,12 +577,9 @@ test("an order's recorded fields cannot be rewritten in place, even by the owner
     await set(ref(context.database(), `${logsPath}/${id}`), validOrder(companyKioskUid, id));
   });
 
-  // Branch rules cascade downward, so the ownerUids grant on $branchId reaches
-  // /logs and an owner can hard-delete an order outright. Without a Cloud
-  // Function the tenant's own owner is trusted with their data, so that is
-  // accepted rather than closed — but it is asserted here so the choice is
-  // visible, and revisited deliberately if that grant is ever narrowed.
-  await assertSucceeds(remove(ref(owner, `${logsPath}/${id}`)));
+  // The broad branch grant has been removed: even an owner cannot erase an
+  // order from the immutable ledger.
+  await assertFails(remove(ref(owner, `${logsPath}/${id}`)));
 
   // Rewriting is a different matter and stays shut: submittedByUid is pinned to
   // the kiosk that placed the order, and any key the shape does not declare is
@@ -972,28 +994,17 @@ test("exclusions cannot be set from outside the branch that owns the order", asy
   ));
 });
 
-test("only a company that does not exist yet is open to anyone", async () => {
-  // This documents the onboarding bootstrap rather than a gap in the exclusions
-  // node, because the first assertion here is the reason the second company in
-  // the previous test had to be one that already exists. $companyId/.write is
-  // gated on `!data.exists()`, so a signed-in account may populate the tree of a
-  // company id nobody has claimed — that is how a new owner creates their own
-  // company, since there is no server to do it for them.
-  //
-  // It is bounded rather than open: companyProfile/.validate requires the writer
-  // to list themselves in ownerUids, so an account can only create a company it
-  // owns, and the moment the company exists the clause stops applying. Closing
-  // it entirely needs a Cloud Function on company creation, which this project
-  // does not have.
+test("new companies bootstrap only through an owner-claimed profile", async () => {
   const stranger = testEnv.authenticatedContext(outsiderUid).database();
   const unclaimed = "company-nobody-has-claimed";
-
-  await assertSucceeds(set(
+  await assertFails(set(
     ref(stranger, `${unclaimed}/branches/branch-x/analyticsExclusions/A`),
     exclusion("A", outsiderUid)
   ));
-
-  // The same write against a company that exists is refused.
+  await assertSucceeds(set(ref(stranger, `${unclaimed}/companyProfile`), {
+    companyId: unclaimed, companyName: 'New Company',
+    ownerUids: { [outsiderUid]: true },
+  }));
   await assertFails(set(
     ref(stranger, `${companyId}/branches/${branchId}/analyticsExclusions/A`),
     exclusion("A", outsiderUid)
@@ -1211,4 +1222,79 @@ test('owner billing changes are atomic and members cannot partially apply them',
   }
   const after = (await get(ref(owner, branchPath))).val();
   for (const key of ['categories', 'inventory', 'logs', 'users']) assert.deepEqual(after[key], before[key]);
+});
+
+test('protected trial can be created once and personal billing cannot grant access', async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const path = `billingEntitlements/${companyId}/${branchId}`;
+  await assertSucceeds(get(ref(manager, path)));
+  await assertFails(update(ref(owner, path), { plan: 'premium', periodEndAt: Date.now() + 86400000 }));
+  await assertFails(remove(ref(owner, path)));
+  await assertFails(update(ref(manager, path), { plan: 'premium' }));
+  await assertSucceeds(update(ref(owner, `${companyId}/users/${managerUid}/workspace`), {
+    plan: 'subscription', subscriptionStatus: 'active',
+  }));
+  assert.equal((await get(ref(owner, path))).val().plan, 'basic');
+});
+
+test('expired branch is readable but rejects all operational writes atomically', async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const device = kiosk(enabledUid);
+  const id = '123e4567-e89b-12d3-a456-426614174099';
+  await testEnv.withSecurityRulesDisabled(async context => {
+    const admin = context.database();
+    await update(ref(admin, `billingEntitlements/${companyId}/${branchId}`), { periodEndAt: 1 });
+    await set(ref(admin, `${branchPath}/kiosks/${enabledUid}`), { kioskUid: enabledUid, name: 'Device', isActive: true });
+  });
+  const stockPath = `${branchPath}/inventory/Drinks/coffee/sizes/Medium/stock`;
+  const stockBefore = (await get(ref(owner, stockPath))).val();
+  await assertSucceeds(get(ref(staff, `${branchPath}/categories`)));
+  await assertSucceeds(get(ref(manager, `${branchPath}/logs`)));
+  await assertFails(update(ref(staff, `${branchPath}/categories/Drinks/coffee`), { available: false }));
+  await assertFails(set(ref(manager, `${branchPath}/categories/Drinks/new`), { name: 'New', price: 1 }));
+  await assertFails(set(ref(owner, `${branchPath}/appSettings/backgroundTheme`), 'Dark'));
+  await assertFails(update(ref(owner, branchPath), { categories: { Drinks: { hacked: { name: 'Hacked' } } } }));
+  await assertFails(update(ref(device), {
+    [`${branchPath}/logs/${id}`]: validOrder(enabledUid, id),
+    [stockPath]: stockBefore - 1,
+  }));
+  assert.equal((await get(ref(owner, `${branchPath}/logs/${id}`))).exists(), false);
+  assert.equal((await get(ref(owner, stockPath))).val(), stockBefore);
+});
+
+test('owner receives exactly one protected Starter trial for a new branch', async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const newBranch = 'branch-new-trial';
+  const path = `billingEntitlements/${companyId}/${newBranch}`;
+  await testEnv.withSecurityRulesDisabled(async context => {
+    await set(ref(context.database(), `${companyId}/branches/${newBranch}/branchProfile`), {
+      branchId: newBranch, ownerUid: managerUid, name: 'Trial branch',
+    });
+  });
+  const trial = {
+    companyId, branchId: newBranch, ownerUid: managerUid,
+    plan: 'starter', subscriptionStatus: 'trialing',
+    periodStartAt: { '.sv': 'timestamp' }, trialStartedAt: { '.sv': 'timestamp' },
+    periodEndAt: Date.now() + 14 * 86400000,
+  };
+  await assertFails(set(ref(manager, path), trial));
+  await assertFails(set(ref(owner, path), { ...trial, plan: 'premium' }));
+  await assertFails(set(ref(owner, path), { ...trial, periodEndAt: Date.now() + 30 * 86400000 }));
+  await assertSucceeds(set(ref(owner, path), trial));
+  await assertFails(set(ref(owner, path), trial));
+  await assertFails(remove(ref(owner, path)));
+});
+
+test('a future timestamp with inactive status cannot authorize writes', async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  await testEnv.withSecurityRulesDisabled(async context => {
+    await update(ref(context.database(), `billingEntitlements/${companyId}/${branchId}`), {
+      subscriptionStatus: 'inactive', periodEndAt: Date.now() + 86400000,
+    });
+  });
+  await assertFails(set(ref(owner, `${branchPath}/appSettings/backgroundTheme`), 'Dark'));
 });

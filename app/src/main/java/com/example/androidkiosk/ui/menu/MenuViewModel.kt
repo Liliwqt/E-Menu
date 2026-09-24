@@ -43,6 +43,7 @@ class MenuViewModel @Inject constructor(
 ) : ViewModel() {
 
     val authorizationState: StateFlow<DeviceAuthorizationState> = authManager.authorizationState
+    val subscriptionEndAt: StateFlow<Long?> = orderRepository.subscriptionEndAt
 
     val categories: StateFlow<List<CategoryWithItems>> = menuRepository
         .observeCategories()
@@ -83,6 +84,12 @@ class MenuViewModel @Inject constructor(
 
     init {
         observeMenuData()
+        viewModelScope.launch {
+            authorizationState.collect { state ->
+                if (state.isAuthorized) orderRepository.startSubscriptionObservation()
+                else orderRepository.stopSubscriptionObservation()
+            }
+        }
     }
 
     private fun observeMenuData() {
@@ -221,6 +228,13 @@ class MenuViewModel @Inject constructor(
             )
             return
         }
+        if ((subscriptionEndAt.value ?: 0L) <= System.currentTimeMillis()) {
+            _submissionState.value = OrderSubmissionState(
+                orderId = order.id,
+                errorMessage = "Branch plan expired. Ordering is paused until the owner renews."
+            )
+            return
+        }
         if (_submissionState.value.isSubmitting ||
             (_submissionState.value.isComplete && _submissionState.value.orderId == order.id)
         ) return
@@ -251,7 +265,8 @@ class MenuViewModel @Inject constructor(
                     Timber.e(error, "Failed to submit order %s", submittedOrder.orderNumber)
                     _submissionState.value = OrderSubmissionState(
                         orderId = submittedOrder.id,
-                        errorMessage = "Unable to submit the order. Check the connection and try again."
+                        errorMessage = if (error.message?.contains("plan expired", ignoreCase = true) == true)
+                            error.message else "Unable to submit the order. Check the connection and try again."
                     )
                 }
         }

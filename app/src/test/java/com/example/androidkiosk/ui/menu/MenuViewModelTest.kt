@@ -214,6 +214,22 @@ class MenuViewModelTest {
     }
 
     @Test
+    fun `expired branch keeps cart but blocks checkout`() = runTest(dispatcher) {
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.addToCartWithQuantity(sizedItem, 1, "Medium")
+        val order = viewModel.confirmOrder("Guest")
+        orderRepository.subscriptionExpiry.value = 0L
+
+        viewModel.submitOrder(order, PaymentMethod.COUNTER, PaymentStatus.PAY_AT_COUNTER)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.cartItems.value.isNotEmpty())
+        assertTrue(viewModel.submissionState.value.errorMessage?.contains("plan expired") == true)
+        assertTrue(orderRepository.submittedOrders.isEmpty())
+    }
+
+    @Test
     fun `decrementing to zero removes the cart line`() = runTest(dispatcher) {
         val viewModel = createViewModel()
         advanceUntilIdle()
@@ -285,6 +301,8 @@ class MenuViewModelTest {
     )
 
     private class RecordingOrderRepository : OrderRepository {
+        val subscriptionExpiry = kotlinx.coroutines.flow.MutableStateFlow<Long?>(Long.MAX_VALUE)
+        override val subscriptionEndAt: kotlinx.coroutines.flow.StateFlow<Long?> = subscriptionExpiry
         val submittedOrders = mutableListOf<Order>()
         var nextResult: Result<Unit> = Result.success(Unit)
 
