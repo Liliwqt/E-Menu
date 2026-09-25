@@ -145,16 +145,7 @@ fun MenuScreen(
     val inventoryStock by viewModel.inventoryStock.collectAsState()
     val submissionState by viewModel.submissionState.collectAsState()
     val authorizationState by viewModel.authorizationState.collectAsState()
-    val subscriptionEndAt by viewModel.subscriptionEndAt.collectAsState()
-    var currentTime by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(subscriptionEndAt) {
-        while (true) {
-            currentTime = System.currentTimeMillis()
-            delay(1000)
-        }
-    }
     val isAuthorized = authorizationState.isAuthorized
-    val orderingActive = isAuthorized && (subscriptionEndAt ?: 0L) > currentTime
 
     // Track UI mode — null means show the mode selection screen
     var selectedUIMode by remember { mutableStateOf<UIMode?>(null) }
@@ -167,8 +158,8 @@ fun MenuScreen(
     var showCounterPayment by remember { mutableStateOf(false) }
     var currentOrder by remember { mutableStateOf<Order?>(null) }
 
-    LaunchedEffect(orderingActive) {
-        if (!orderingActive) {
+    LaunchedEffect(isAuthorized) {
+        if (!isAuthorized) {
             selectedItem = null
             showCart = false
             showCheckout = false
@@ -272,7 +263,7 @@ fun MenuScreen(
                 containerColor = Color.Transparent,
                 modifier = Modifier.fillMaxSize(),
                 bottomBar = {
-                    if (orderingActive && selectedUIMode != null && !isLoading && errorMessage == null) {
+                    if (isAuthorized && selectedUIMode != null && !isLoading && errorMessage == null) {
                         CartSummaryBar(
                             cartItems = cartItems,
                             onViewCart = { showCart = true }
@@ -340,23 +331,8 @@ fun MenuScreen(
                 }
             }
         }
-        if (isAuthorized && !orderingActive) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(16.dp)
-            ) {
-                Text(
-                    if (subscriptionEndAt == null) "Checking branch subscription…"
-                    else "Branch plan expired. Ordering is paused until the owner renews.",
-                    color = MaterialTheme.colorScheme.onErrorContainer
-                )
-            }
-        }
         // ── Overlays ───────────────────────────────────────────
-        if (orderingActive) selectedItem?.let { item ->
+        if (isAuthorized) selectedItem?.let { item ->
             ItemDetailOverlay(
                 item = item,
                 stockBySize = inventoryStock["${item.categoryName}/${item.id}"],
@@ -367,7 +343,7 @@ fun MenuScreen(
             )
         }
 
-        if (orderingActive && showCart) {
+        if (isAuthorized && showCart) {
             CartOverlay(
                 viewModel = viewModel,
                 onDismiss = { showCart = false },
@@ -375,7 +351,7 @@ fun MenuScreen(
             )
         }
 
-        if (orderingActive && showCheckout) {
+        if (isAuthorized && showCheckout) {
             CheckoutOverlay(
                 viewModel = viewModel,
                 onDismiss = { showCheckout = false },
