@@ -17,6 +17,16 @@ object CartPresentation {
     /** Line subtotal using the size-adjusted unit price held on the cart item. */
     fun lineSubtotal(cartItem: CartItem): Double = cartItem.price * cartItem.quantity
 
+    /**
+     * Line subtotal for the item detail overlay, where there is no [CartItem] yet — the unit
+     * price is the size-adjusted effective price and the quantity is what the stepper holds.
+     *
+     * The overlay previously showed the unit price beside a quantity control, so a customer
+     * setting quantity to 3 still read a single-item price.
+     */
+    fun lineSubtotal(effectivePrice: Double, quantity: Int): Double =
+        effectivePrice * quantity.coerceAtLeast(0)
+
     /** Sum of every line subtotal. */
     fun cartTotal(cartItems: List<CartItem>): Double = cartItems.sumOf { it.price * it.quantity }
 
@@ -60,21 +70,19 @@ object CartPresentation {
         }
     }
 
-    /**
-     * Explains which rule is limiting the quantity, or null when there is nothing useful to add
-     * (unavailable or untracked-but-open inventory).
-     */
-    fun limitExplanation(item: MenuItem, selectedSize: String, limit: MenuQuantityRules.QuantityLimit): String? {
-        if (selectedSize.isNotBlank() && selectedSize !in item.sizes) return null
-        return when {
-            limit.maxQuantity <= 0 -> null
-            limit.source == MenuQuantityRules.LimitSource.STOCK ->
-                "Limit: ${limit.maxQuantity} left in stock"
-            limit.isTracked -> "Stock: ${limit.trackedStock}; max ${limit.maxQuantity} per order"
-            else -> "Max ${limit.maxQuantity} per order"
-        }
-    }
-
     /** Text shown when numeric inventory is unavailable for an item. */
     const val UNKNOWN_AVAILABILITY = "Availability checked when ordering"
+
+    /**
+     * Stock line for the item detail overlay.
+     *
+     * "1 available" read ambiguously against the price and the quantity stepper — it was
+     * unclear whether it meant one in stock, one on hand for this size, or one allowed per
+     * order. It is the count for the *selected size*, so it says so.
+     */
+    fun availabilityText(limit: MenuQuantityRules.QuantityLimit): String = when {
+        limit.trackedStock == null -> UNKNOWN_AVAILABILITY
+        limit.trackedStock > 0 -> "${limit.trackedStock} left in stock"
+        else -> "Out of stock"
+    }
 }

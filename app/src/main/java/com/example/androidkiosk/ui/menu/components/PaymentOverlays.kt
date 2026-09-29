@@ -30,12 +30,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Storefront
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -141,7 +141,9 @@ fun PaymentMethodOverlay(
                         .fillMaxHeight(if (isPaymentPortrait) 0.82f else 0.85f)
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
-                    elevation = 6.dp
+                    // No exterior drop shadow: on a dark scrim it reads as a glow rather
+                    // than elevation. Matches the item detail and cart overlays.
+                    elevation = 0.dp
                 ) {
                     Column(
                         modifier = Modifier
@@ -284,7 +286,6 @@ private fun PaymentOptionCard(
                 onClick = onClick
             ),
         shape = MaterialTheme.shapes.large,
-        borderColor = accentColor.copy(alpha = 0.4f),
         elevation = 2.dp
     ) {
         Column(
@@ -298,7 +299,7 @@ private fun PaymentOptionCard(
                 modifier = Modifier
                     .size(72.dp)
                     .background(
-                        accentColor.copy(alpha = 0.1f),
+                        LocalBackgroundTheme.current.surfaceContainerHigh,
                         MaterialTheme.shapes.extraLarge
                     ),
                 contentAlignment = Alignment.Center
@@ -429,7 +430,9 @@ fun QRPaymentOverlay(
                         .fillMaxHeight(if (isQrPortrait) 0.82f else 0.85f)
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
-                    elevation = 6.dp
+                    // No exterior drop shadow: on a dark scrim it reads as a glow rather
+                    // than elevation. Matches the item detail and cart overlays.
+                    elevation = 0.dp
                 ) {
                     Column(
                         modifier = Modifier
@@ -487,7 +490,7 @@ fun QRPaymentOverlay(
                                         text = "Order Submitted",
                                         style = MaterialTheme.typography.headlineMedium,
                                         fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF4CAF50)
+                                        color = Color(0xFF2F6B45)
                                     )
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
@@ -515,7 +518,12 @@ fun QRPaymentOverlay(
                                         onClick = { doneOnce() },
                                         modifier = Modifier
                                             .fillMaxWidth(0.85f)
-                                            .height(52.dp),
+                                            // requiredHeight, not height: this lives in a weighted
+                                            // Column that passes down a max height below the
+                                            // button's intrinsic one, and a plain height gets
+                                            // coerced to it. Keeping the Done control reachable
+                                            // after submitting matters more than centring it.
+                                            .requiredHeight(52.dp),
                                         shape = MaterialTheme.shapes.large
                                     ) {
                                         Text("Done / Next customer", fontWeight = FontWeight.Bold)
@@ -576,16 +584,22 @@ fun QRPaymentOverlay(
                             }
 
                             else -> {
+                                // spacedBy rather than Arrangement.Center: a centred
+                                // column that is taller than its slot overflows equally at BOTH
+                                // ends, so the caption and the trailing note collided with the
+                                // "Amount to Pay" block below the divider. Even spacing from
+                                // the top keeps the overflow one-sided, and the smaller QR box
+                                // plus tighter gaps keep it inside the slot outright.
                                 Column(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxWidth(),
                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(230.dp)
+                                            .size(190.dp)
                                             .clip(MaterialTheme.shapes.large)
                                             .border(
                                                 2.dp,
@@ -604,19 +618,23 @@ fun QRPaymentOverlay(
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.height(12.dp))
                                     Text(
                                         text = "Scan with GCash and enter the amount shown below.",
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        style = MaterialTheme.typography.bodySmall,
                                         textAlign = TextAlign.Center,
                                         color = qrTheme.secondaryTextColor
                                     )
-                                    Spacer(modifier = Modifier.height(12.dp))
                                     Button(
                                         onClick = { reportPaidOnce() },
                                         modifier = Modifier
                                             .fillMaxWidth(0.85f)
-                                            .height(52.dp),
+                                            // Required, not cosmetic: this sits inside a weighted
+                                            // Column, which hands its children a max height smaller
+                                            // than their intrinsic one. A fixed height alone gets
+                                            // coerced to that max, so the button was squashed
+                                            // flat with its label half cut off. Required height
+                                            // wins over the incoming constraint.
+                                            .requiredHeight(52.dp),
                                         shape = MaterialTheme.shapes.large,
                                         enabled = !actionPending
                                     ) {
@@ -625,7 +643,6 @@ fun QRPaymentOverlay(
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
-                                    Spacer(modifier = Modifier.height(8.dp))
                                     Text(
                                         text = "This records your report; staff will verify the payment.",
                                         style = MaterialTheme.typography.bodySmall,
@@ -636,9 +653,7 @@ fun QRPaymentOverlay(
                             }
                         }
 
-                        HorizontalDivider(color = qrTheme.outlineVariantColor)
-
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         // Total amount
                         Text(
@@ -755,12 +770,23 @@ fun CounterPaymentOverlay(
                         .fillMaxHeight(if (isCounterPortrait) 0.82f else 0.85f)
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
-                    elevation = 6.dp
+                    // No exterior drop shadow: on a dark scrim it reads as a glow rather
+                    // than elevation. Matches the item detail and cart overlays.
+                    elevation = 0.dp
                 ) {
+                    // Deliberately NOT scrollable. A scroll container here is what crashed the
+                    // app: this body and the isComplete branch below both declared
+                    // verticalScroll, and the inner one is measured with an infinity maximum
+                    // height, which Compose rejects outright
+                    // ("Vertically scrollable component was measured with an infinity maximum
+                    // height constraints"). It fired the moment submitting flipped isComplete.
+                    // The layout below is spaced to fit a short landscape screen instead, so
+                    // every state — including the confirmation and its Done control — is
+                    // visible without scrolling.
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(24.dp),
+                            .padding(horizontal = 20.dp, vertical = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         // Header
@@ -782,52 +808,51 @@ fun CounterPaymentOverlay(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         // Counter icon with M3 surface container
                         val counterTheme = LocalBackgroundTheme.current
                         Box(
                             modifier = Modifier
-                                .size(100.dp),
+                                .size(64.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Storefront,
                                 contentDescription = null,
-                                modifier = Modifier.size(56.dp),
+                                modifier = Modifier.size(40.dp),
                                 tint = counterTheme.primaryTextColor
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(28.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         // Order Number - prominent display
                         Text(
                             text = "Your Order Number",
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = counterTheme.secondaryTextColor
                         )
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         Box(
                             modifier = Modifier
-                                .padding(horizontal = 40.dp, vertical = 16.dp)
+                                .padding(horizontal = 40.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = "#${order.orderNumber}",
-                                style = MaterialTheme.typography.displayMedium,
+                                style = MaterialTheme.typography.displaySmall,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = counterTheme.primaryTextColor
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                        HorizontalDivider(color = counterTheme.outlineVariantColor)
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
+                        // No divider here: this panel's sections are separated by spacing alone.
+                        // The line sat directly above "Total Amount" and read as an underline on
+                        // the label once the sections were tightened, rather than as a divider.
                         // Total
                         Text(
                             text = "Total Amount",
@@ -841,34 +866,33 @@ fun CounterPaymentOverlay(
                             color = counterTheme.accentColor
                         )
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
                         when {
                             isComplete -> Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .verticalScroll(rememberScrollState()),
+                                modifier = Modifier.fillMaxWidth(),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Text(
                                     text = "Order submitted. Please proceed to the counter and pay with cash or card.",
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     textAlign = TextAlign.Center,
-                                    color = Color(0xFF4CAF50)
+                                    lineHeight = 19.sp,
+                                    color = Color(0xFF2F6B45)
                                 )
-                                Spacer(modifier = Modifier.height(12.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "Show this order number to the staff: #${order.orderNumber}",
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.bodySmall,
                                     textAlign = TextAlign.Center,
                                     color = counterTheme.secondaryTextColor
                                 )
-                                Spacer(modifier = Modifier.height(20.dp))
+                                Spacer(modifier = Modifier.height(14.dp))
                                 Button(
                                     onClick = { doneOnce() },
                                     modifier = Modifier
                                         .fillMaxWidth(0.85f)
-                                        .height(52.dp),
+                                        .requiredHeight(48.dp),
                                     shape = MaterialTheme.shapes.large
                                 ) {
                                     Text("Done / Next customer", fontWeight = FontWeight.Bold)
@@ -881,18 +905,19 @@ fun CounterPaymentOverlay(
                                 Text(
                                     text = errorMessage
                                         ?: "Submit the order, then proceed to the counter to complete payment.",
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     textAlign = TextAlign.Center,
                                     color = if (errorMessage == null) {
                                         counterTheme.secondaryTextColor
                                     } else {
                                         MaterialTheme.colorScheme.error
                                     },
-                                    lineHeight = 24.sp
+                                    lineHeight = 18.sp
                                 )
-                                Spacer(modifier = Modifier.height(16.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
                                 Button(
                                     onClick = { submitOnce() },
+                                    modifier = Modifier.requiredHeight(48.dp),
                                     enabled = !actionPending
                                 ) {
                                     Text(if (errorMessage == null) "SUBMIT ORDER" else "TRY AGAIN")

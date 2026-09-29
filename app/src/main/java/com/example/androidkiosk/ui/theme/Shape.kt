@@ -6,9 +6,9 @@ import androidx.compose.ui.unit.dp
 
 /** Material Design 3 shape token system. */
 val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(12.dp),
     large = RoundedCornerShape(16.dp),
-    extraLarge = RoundedCornerShape(28.dp)
+    extraLarge = RoundedCornerShape(16.dp)
 )

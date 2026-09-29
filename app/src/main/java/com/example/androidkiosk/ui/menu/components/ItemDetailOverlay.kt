@@ -9,6 +9,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -191,8 +192,7 @@ fun ItemDetailOverlay(
                         .fillMaxHeight(if (isPortrait) 0.8f else 0.92f)
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
-                    backgroundColor = MaterialTheme.colorScheme.surface,
-                    elevation = 6.dp
+                    elevation = 0.dp
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
                         // ── Image section (shrinks on constrained screens) ──
@@ -252,6 +252,21 @@ fun ItemDetailOverlay(
                                 fontWeight = FontWeight.ExtraBold,
                                 color = detailTheme.accentColor
                             )
+                            // Running line total. The overlay used to show only the unit price
+                            // while a quantity stepper sat in the footer, so setting the quantity
+                            // to 3 still read as a single item. Shown only once the quantity
+                            // differs from one, keeping the common case uncluttered, and styled
+                            // distinctly from the unit price so the two are never read as
+                            // competing totals.
+                            if (quantity > 1) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "${CartPresentation.formatPrice(CartPresentation.lineSubtotal(effectivePrice, quantity))} total",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = detailTheme.secondaryTextColor
+                                )
+                            }
                             Spacer(modifier = Modifier.height(16.dp))
 
                             // M3 HorizontalDivider
@@ -276,37 +291,61 @@ fun ItemDetailOverlay(
                                     item.sizes.forEach { (sizeName, option) ->
                                         val sizeAvailable = MenuQuantityRules
                                             .quantityLimit(stockBySize, sizeName).isAvailable
-                                        FilterChip(
-                                            selected = selectedSize == sizeName,
-                                            onClick = {
-                                                selectedSize = sizeName
-                                                quantity = 1
-                                            },
-                                            enabled = sizeAvailable,
-                                            label = {
-                                                val label = when {
-                                                    !sizeAvailable -> "$sizeName — Sold out"
-                                                    option.priceModifier == 0.0 -> sizeName
-                                                    else -> "$sizeName +₱${
-                                                        String.format(Locale.getDefault(), "%.2f", option.priceModifier)
-                                                    }"
-                                                }
-                                                Text(label)
-                                            },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                disabledLabelColor = detailTheme.secondaryTextColor.copy(alpha = 0.6f)
+                                        val isSelected = selectedSize == sizeName
+                                        // The chip no longer paints a container, so the raised
+                                        // card itself is what changes: the selected size is
+                                        // pressed IN (shadows flipped, no offset) while an
+                                        // unselected one stays raised. Colour alone would not
+                                        // survive a greyscale or high-contrast reading.
+                                        GlassCard(
+                                            shape = MaterialTheme.shapes.medium,
+                                            elevation = if (isSelected) 0.dp else 2.dp,
+                                            isPressed = isSelected
+                                        ) {
+                                            FilterChip(
+                                                border = null,
+                                                selected = isSelected,
+                                                onClick = {
+                                                    selectedSize = sizeName
+                                                    quantity = 1
+                                                },
+                                                enabled = sizeAvailable,
+                                                label = {
+                                                    val label = when {
+                                                        !sizeAvailable -> "$sizeName — Sold out"
+                                                        option.priceModifier == 0.0 -> sizeName
+                                                        else -> "$sizeName +₱${
+                                                            String.format(Locale.getDefault(), "%.2f", option.priceModifier)
+                                                        }"
+                                                    }
+                                                    Text(
+                                                        text = label,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    // Transparent so the neumorphic card behind the
+                                                    // chip is what actually shows. FilterChip paints
+                                                    // its own container by default, which put a flat
+                                                    // grey panel inside the raised shadow and
+                                                    // flattened the effect. Selection is carried by
+                                                    // the label colour, weight and the card's own
+                                                    // pressed state instead.
+                                                    containerColor = Color.Transparent,
+                                                    selectedContainerColor = Color.Transparent,
+                                                    disabledContainerColor = Color.Transparent,
+                                                    selectedLabelColor = detailTheme.accentColor,
+                                                    labelColor = detailTheme.primaryTextColor,
+                                                    disabledLabelColor = detailTheme.secondaryTextColor.copy(alpha = 0.6f)
+                                                )
                                             )
-                                        )
+                                        }
                                     }
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
                             }
                             val trackedStock = sizeLimit.trackedStock
-                            val availabilityText = when {
-                                trackedStock == null -> CartPresentation.UNKNOWN_AVAILABILITY
-                                trackedStock > 0 -> "$trackedStock available"
-                                else -> "Out of stock"
-                            }
+                            val availabilityText = CartPresentation.availabilityText(sizeLimit)
                             val isOutOfStock = trackedStock != null && trackedStock <= 0
                             Text(
                                 text = availabilityText,
@@ -318,13 +357,6 @@ fun ItemDetailOverlay(
                                 }
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Tap outside to close",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = detailTheme.secondaryTextColor,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth()
-                            )
                         }
 
                         HorizontalDivider(
@@ -346,28 +378,29 @@ fun ItemDetailOverlay(
                             ) {
                                 Row(
                                     modifier = Modifier
-                                        .clip(MaterialTheme.shapes.large)
                                         .padding(horizontal = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    FilledTonalIconButton(
-                                        onClick = { if (quantity > 1) quantity-- },
-                                        enabled = item.available && quantity > 1,
-                                        modifier = Modifier.size(48.dp),
-                                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                            containerColor = Color.Transparent,
-                                            contentColor = detailTheme.primaryTextColor,
-                                            disabledContentColor = detailTheme.secondaryTextColor
-                                        )
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Remove,
-                                            contentDescription = CartPresentation.decreaseContentDescription(
-                                                item,
-                                                selectedSize
+                                    GlassCard(shape = androidx.compose.foundation.shape.CircleShape, elevation = 2.dp) {
+                                        FilledTonalIconButton(
+                                            onClick = { if (quantity > 1) quantity-- },
+                                            enabled = item.available && quantity > 1,
+                                            modifier = Modifier.size(48.dp),
+                                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                                containerColor = Color.Transparent,
+                                                contentColor = detailTheme.primaryTextColor,
+                                                disabledContentColor = detailTheme.secondaryTextColor
                                             )
-                                        )
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Remove,
+                                                contentDescription = CartPresentation.decreaseContentDescription(
+                                                    item,
+                                                    selectedSize
+                                                )
+                                            )
+                                        }
                                     }
                                     Text(
                                         text = "$quantity",
@@ -377,60 +410,57 @@ fun ItemDetailOverlay(
                                         textAlign = TextAlign.Center,
                                         modifier = Modifier.width(32.dp)
                                     )
-                                    FilledTonalIconButton(
-                                        onClick = { if (quantity < maxQuantity) quantity++ },
-                                        enabled = item.available && quantity < maxQuantity,
-                                        modifier = Modifier.size(48.dp),
-                                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                            containerColor = Color.Transparent,
-                                            contentColor = detailTheme.primaryTextColor,
-                                            disabledContentColor = detailTheme.secondaryTextColor
-                                        )
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = CartPresentation.increaseContentDescription(
-                                                item = item,
-                                                selectedSize = selectedSize,
-                                                atLimit = quantity >= maxQuantity,
-                                                limit = sizeLimit
+                                    GlassCard(shape = androidx.compose.foundation.shape.CircleShape, elevation = 2.dp) {
+                                        FilledTonalIconButton(
+                                            onClick = { if (quantity < maxQuantity) quantity++ },
+                                            enabled = item.available && quantity < maxQuantity,
+                                            modifier = Modifier.size(48.dp),
+                                            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                                containerColor = Color.Transparent,
+                                                contentColor = detailTheme.primaryTextColor,
+                                                disabledContentColor = detailTheme.secondaryTextColor
                                             )
-                                        )
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = CartPresentation.increaseContentDescription(
+                                                    item = item,
+                                                    selectedSize = selectedSize,
+                                                    atLimit = quantity >= maxQuantity,
+                                                    limit = sizeLimit
+                                                )
+                                            )
+                                        }
                                     }
                                 }
 
-                                Button(
-                                    onClick = { animatedAddToCart() },
-                                    modifier = Modifier.height(52.dp),
-                                    shape = MaterialTheme.shapes.large,
-                                    enabled = item.available && maxQuantity > 0,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
-                                    ),
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ShoppingCart,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Add to Cart",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                    )
+                                GlassCard(shape = MaterialTheme.shapes.large, backgroundColor = detailTheme.accentColor, elevation = 2.dp) {
+                                    Button(
+                                        onClick = { animatedAddToCart() },
+                                        modifier = Modifier.height(52.dp),
+                                        shape = MaterialTheme.shapes.large,
+                                        enabled = item.available && maxQuantity > 0,
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ShoppingCart,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Add to Cart",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
                                 }
                             }
 
-                            CartPresentation.limitExplanation(item, selectedSize, sizeLimit)?.let { explanation ->
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = explanation,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = detailTheme.secondaryTextColor
-                                )
-                            }
+
                         }
                     }
                 }

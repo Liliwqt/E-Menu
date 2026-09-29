@@ -289,7 +289,6 @@ class CheckoutOverlaysTest {
         }
 
         composeRule.onNodeWithText("Availability checked when ordering").assertExists()
-        composeRule.onNodeWithText("Max 99 per order").assertExists()
     }
 
     @Test
@@ -321,13 +320,15 @@ class CheckoutOverlaysTest {
         composeRule.onNodeWithContentDescription("Increase quantity of Coffee (Medium), unavailable")
             .assertExists()
 
-        // Select the available size so the limit explanation reflects tracked stock.
+        // Select the available size so the availability line reflects tracked stock.
         composeRule.onNodeWithText("Large +₱25.00").performClick()
         composeRule.onNodeWithContentDescription("Decrease quantity of Coffee (Large)", substring = true)
             .assertExists()
         composeRule.onNodeWithContentDescription("Increase quantity of Coffee (Large)", substring = true)
             .assertExists()
-        composeRule.onNodeWithText("Limit: 2 left in stock").assertExists()
+        // Tracked stock is stated plainly. The 99-per-order ceiling is only surfaced on the
+        // disabled control's accessible label, never as visible copy.
+        composeRule.onNodeWithText("2 left in stock").assertExists()
     }
 
     @Test

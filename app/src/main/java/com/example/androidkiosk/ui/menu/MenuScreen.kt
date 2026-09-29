@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -83,6 +84,7 @@ import android.content.res.Configuration
 import coil3.compose.AsyncImage
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import com.example.androidkiosk.R
 import com.example.androidkiosk.admin.PinManager
@@ -98,6 +100,7 @@ import com.example.androidkiosk.model.Order
 import com.example.androidkiosk.model.PaymentMethod
 import com.example.androidkiosk.model.PaymentStatus
 import com.example.androidkiosk.ui.menu.components.AdminPinDialog
+import com.example.androidkiosk.ui.menu.components.ConfirmCartExitOverlay
 import com.example.androidkiosk.ui.menu.components.CategoryPageContent
 import com.example.androidkiosk.ui.menu.components.CounterPaymentOverlay
 import com.example.androidkiosk.ui.menu.components.ErrorScreen
@@ -150,23 +153,32 @@ fun MenuScreen(
     // Track UI mode — null means show the mode selection screen
     var selectedUIMode by remember { mutableStateOf<UIMode?>(null) }
 
-    var selectedItem by remember { mutableStateOf<MenuItem?>(null) }
-    var showCart by remember { mutableStateOf(false) }
-    var showCheckout by remember { mutableStateOf(false) }
-    var showPaymentMethod by remember { mutableStateOf(false) }
-    var showQRPayment by remember { mutableStateOf(false) }
-    var showCounterPayment by remember { mutableStateOf(false) }
-    var currentOrder by remember { mutableStateOf<Order?>(null) }
+    // The whole ordering flow as one stack rather than six independent booleans. Back used to
+    // have nowhere to pop to, so it finished the Activity from every overlay and took the
+    // in-memory cart with it. See MenuNavigation.
+    var navState by remember { mutableStateOf(MenuNavigation.MenuState()) }
+
+    // Hoisted out of CheckoutOverlay so closing and reopening checkout no longer discards a
+    // half-typed customer name. It was a private remember, so any detour through the cart
+    // silently threw away what the customer had typed.
+    var customerName by remember { mutableStateOf("") }
+
+    // Asks before Back discards a cart the customer has already built.
+    var showExitConfirmation by remember { mutableStateOf(false) }
+
+    val currentOrder: Order? = (navState.top as? MenuNavigation.Stage.QrPayment)?.order
+        ?: (navState.top as? MenuNavigation.Stage.CounterPayment)?.order
+        ?: (navState.top as? MenuNavigation.Stage.PaymentMethod)?.order
 
     LaunchedEffect(isAuthorized) {
         if (!isAuthorized) {
-            selectedItem = null
-            showCart = false
-            showCheckout = false
-            showPaymentMethod = false
-            showQRPayment = false
-            showCounterPayment = false
+            navState = MenuNavigation.dismissAll()
+            showExitConfirmation = false
         }
+    }
+
+    fun closeTopStage() {
+        MenuNavigation.pop(navState)?.let { navState = it }
     }
 
     // Secret corner tap state: 5 taps in top-right corner within 3 seconds
@@ -194,10 +206,26 @@ fun MenuScreen(
     }
 
     val blurAmount by animateFloatAsState(
-        targetValue = if (selectedItem != null || showCart || showCheckout || showPaymentMethod || showQRPayment || showCounterPayment || showPinDialog) 10f else 0f,
+        targetValue = if (navState.hasOverlay || showPinDialog || showExitConfirmation) 10f else 0f,
         animationSpec = tween(150),
         label = "blur"
     )
+
+    // Back unwinds one overlay at a time. Before this there was no BackHandler in MenuScreen at
+    // all, so Back finished the Activity from the item detail, cart, checkout, and payment
+    // method overlays — destroying a cart the customer had spent minutes building.
+    //
+    // This is NOT device-owner lockdown. The lockout was removed deliberately because staff
+    // use this app on their own phones; an empty cart still exits freely, a full one asks
+    // first, and the customer can always leave via the dialog's "Leave anyway".
+    BackHandler {
+        when (MenuNavigation.backAction(navState, cartItems)) {
+            MenuNavigation.BackAction.POP -> closeTopStage()
+            MenuNavigation.BackAction.CONSUME -> Unit // a confirmation is showing; Done is the only exit
+            MenuNavigation.BackAction.CONFIRM_EXIT -> showExitConfirmation = true
+            MenuNavigation.BackAction.EXIT -> activity?.finish()
+        }
+    }
 
     Box(modifier = Modifier
         .fillMaxSize()
@@ -266,7 +294,7 @@ fun MenuScreen(
                     if (isAuthorized && selectedUIMode != null && !isLoading && errorMessage == null) {
                         CartSummaryBar(
                             cartItems = cartItems,
-                            onViewCart = { showCart = true }
+                            onViewCart = { navState = MenuNavigation.push(navState, MenuNavigation.Stage.Cart) }
                         )
                     }
                 }
@@ -305,7 +333,12 @@ fun MenuScreen(
                                             modifier = Modifier.fillMaxSize(),
                                             bestSellers = bestSellers,
                                             categories = categories,
-                                            onItemClick = { item -> selectedItem = item }
+                                            onItemClick = { item ->
+                                                navState = MenuNavigation.push(
+                                                    navState,
+                                                    MenuNavigation.Stage.ItemDetail(item)
+                                                )
+                                            }
                                         )
                                     }
                                     UIMode.NEW_HORIZONTAL -> {
@@ -313,7 +346,12 @@ fun MenuScreen(
                                             modifier = Modifier.fillMaxSize(),
                                             bestSellers = bestSellers,
                                             categories = categories,
-                                            onItemClick = { item -> selectedItem = item }
+                                            onItemClick = { item ->
+                                                navState = MenuNavigation.push(
+                                                    navState,
+                                                    MenuNavigation.Stage.ItemDetail(item)
+                                                )
+                                            }
                                         )
                                     }
                                     UIMode.PORTRAIT -> {
@@ -321,7 +359,12 @@ fun MenuScreen(
                                             modifier = Modifier.fillMaxSize(),
                                             bestSellers = bestSellers,
                                             categories = categories,
-                                            onItemClick = { item -> selectedItem = item }
+                                            onItemClick = { item ->
+                                                navState = MenuNavigation.push(
+                                                    navState,
+                                                    MenuNavigation.Stage.ItemDetail(item)
+                                                )
+                                            }
                                         )
                                     }
                                 }
@@ -332,99 +375,121 @@ fun MenuScreen(
             }
         }
         // ── Overlays ───────────────────────────────────────────
-        if (isAuthorized) selectedItem?.let { item ->
-            ItemDetailOverlay(
-                item = item,
-                stockBySize = inventoryStock["${item.categoryName}/${item.id}"],
-                onDismiss = { selectedItem = null },
-                onAddToCart = { menuItem, quantity, size ->
-                    viewModel.addToCartWithQuantity(menuItem, quantity, size)
-                }
-            )
+        // Driven by the top of the navigation stack. The previous code used six independent
+        // booleans, so nothing could be popped and Back had to finish the Activity.
+        (navState.top as? MenuNavigation.Stage.ItemDetail)?.let { stage ->
+            val item = stage.item
+            if (isAuthorized) {
+                ItemDetailOverlay(
+                    item = item,
+                    stockBySize = inventoryStock["${item.categoryName}/${item.id}"],
+                    onDismiss = { closeTopStage() },
+                    onAddToCart = { menuItem, quantity, size ->
+                        viewModel.addToCartWithQuantity(menuItem, quantity, size)
+                    }
+                )
+            }
         }
 
-        if (isAuthorized && showCart) {
+        if (isAuthorized && navState.top == MenuNavigation.Stage.Cart) {
             CartOverlay(
                 viewModel = viewModel,
-                onDismiss = { showCart = false },
-                onProceedToCheckout = { showCart = false; showCheckout = true }
+                onDismiss = { closeTopStage() },
+                onProceedToCheckout = {
+                    navState = MenuNavigation.push(navState, MenuNavigation.Stage.Checkout)
+                }
             )
         }
 
-        if (isAuthorized && showCheckout) {
+        if (isAuthorized && navState.top == MenuNavigation.Stage.Checkout) {
             CheckoutOverlay(
                 viewModel = viewModel,
-                onDismiss = { showCheckout = false },
+                customerName = customerName,
+                onCustomerNameChange = { customerName = it },
+                onDismiss = { closeTopStage() },
                 onOrderConfirmed = { order ->
-                    currentOrder = order
-                    showCheckout = false
-                    showPaymentMethod = true
+                    navState = MenuNavigation.push(
+                        navState,
+                        MenuNavigation.Stage.PaymentMethod(order)
+                    )
                 }
             )
         }
 
-        if (isAuthorized && showPaymentMethod && currentOrder != null) {
-            PaymentMethodOverlay(
-                order = currentOrder!!,
-                onDismiss = { showPaymentMethod = false },
-                onMethodSelected = { paymentMethod ->
-                    showPaymentMethod = false
-                    when (paymentMethod) {
-                        PaymentMethod.QR_CODE -> {
-                            showQRPayment = true
-                        }
-                        PaymentMethod.COUNTER -> {
-                            showCounterPayment = true
-                        }
+        (navState.top as? MenuNavigation.Stage.PaymentMethod)?.let { stage ->
+            if (isAuthorized) {
+                PaymentMethodOverlay(
+                    order = stage.order,
+                    onDismiss = { closeTopStage() },
+                    onMethodSelected = { paymentMethod ->
+                        navState = MenuNavigation.push(
+                            navState,
+                            when (paymentMethod) {
+                                PaymentMethod.QR_CODE -> MenuNavigation.Stage.QrPayment(stage.order)
+                                PaymentMethod.COUNTER -> MenuNavigation.Stage.CounterPayment(stage.order)
+                            }
+                        )
                     }
-                }
-            )
+                )
+            }
         }
 
-        if (isAuthorized && showQRPayment && currentOrder != null) {
-            QRPaymentOverlay(
-                order = currentOrder!!,
-                isSubmitting = submissionState.isSubmitting,
-                isComplete = submissionState.isComplete,
-                errorMessage = submissionState.errorMessage,
-                onPaid = {
-                    currentOrder?.let {
+        (navState.top as? MenuNavigation.Stage.QrPayment)?.let { stage ->
+            if (isAuthorized) {
+                QRPaymentOverlay(
+                    order = stage.order,
+                    isSubmitting = submissionState.isSubmitting,
+                    // A confirmation is never dismissed by Back; MenuNavigation tracks it
+                    // separately so the payment stage underneath stays intact.
+                    isComplete = submissionState.isComplete,
+                    errorMessage = submissionState.errorMessage,
+                    onPaid = {
                         viewModel.submitOrder(
-                            it,
+                            stage.order,
                             PaymentMethod.QR_CODE,
                             PaymentStatus.CUSTOMER_REPORTED_PAID
                         )
+                    },
+                    onDismiss = {
+                        navState = MenuNavigation.dismissAll()
+                        viewModel.resetOrderFlow()
                     }
-                },
-                onDismiss = {
-                    showQRPayment = false
-                    showPaymentMethod = false
-                    currentOrder = null
-                    viewModel.resetOrderFlow()
-                }
-            )
+                )
+            }
         }
 
-        if (isAuthorized && showCounterPayment && currentOrder != null) {
-            CounterPaymentOverlay(
-                order = currentOrder!!,
-                isSubmitting = submissionState.isSubmitting,
-                isComplete = submissionState.isComplete,
-                errorMessage = submissionState.errorMessage,
-                onSubmit = {
-                    currentOrder?.let {
+        (navState.top as? MenuNavigation.Stage.CounterPayment)?.let { stage ->
+            if (isAuthorized) {
+                CounterPaymentOverlay(
+                    order = stage.order,
+                    isSubmitting = submissionState.isSubmitting,
+                    isComplete = submissionState.isComplete,
+                    errorMessage = submissionState.errorMessage,
+                    onSubmit = {
                         viewModel.submitOrder(
-                            it,
+                            stage.order,
                             PaymentMethod.COUNTER,
                             PaymentStatus.PAY_AT_COUNTER
                         )
+                    },
+                    onDismiss = {
+                        navState = MenuNavigation.dismissAll()
+                        viewModel.resetOrderFlow()
                     }
-                },
-                onDismiss = {
-                    showCounterPayment = false
-                    showPaymentMethod = false
-                    currentOrder = null
+                )
+            }
+        }
+
+        // Exit guard: Back at the menu with a non-empty cart asks before discarding it.
+        if (showExitConfirmation) {
+            ConfirmCartExitOverlay(
+                cartItems = cartItems,
+                onStay = { showExitConfirmation = false },
+                onLeave = {
+                    showExitConfirmation = false
+                    navState = MenuNavigation.dismissAll()
                     viewModel.resetOrderFlow()
+                    activity?.finish()
                 }
             )
         }
@@ -440,8 +505,7 @@ fun MenuScreen(
         }
 
         // Visible admin entry — opens the PIN dialog. The five-corner tap still works as a backup.
-        val anyOverlayOpen = selectedItem != null || showCart || showCheckout || showPaymentMethod ||
-            showQRPayment || showCounterPayment || showPinDialog
+        val anyOverlayOpen = navState.hasOverlay || showPinDialog || showExitConfirmation
         if (isAuthorized && selectedUIMode != null && !isAdminUnlocked && !anyOverlayOpen) {
             Box(
                 modifier = Modifier
@@ -1012,7 +1076,10 @@ private fun CartOverlay(
                         .fillMaxHeight(if (isCartPortrait) 0.85f else 0.9f)
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
-                    elevation = 6.dp
+                    // No exterior drop shadow on the cart panel: it sat on a dark scrim, where a
+                    // shadow around the outside edge read as a glow rather than elevation. The
+                    // dimmed menu behind still provides the depth cue. Matches ItemDetailOverlay.
+                    elevation = 0.dp
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Row(
@@ -1120,11 +1187,18 @@ private fun CartListItem(
     onUpdateQuantity: (CartItem, Int) -> Unit
 ) {
     val storageBucket = stringResource(R.string.google_storage_bucket)
+    // The row is a raised neumorphic card, matching the size chips in the item detail overlay.
+    // The flat surfaceOverlayColor it used before carried no depth at all, so the line, the
+    // controls and the thumbnail all read as one undifferentiated block.
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        elevation = 3.dp
+    ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(LocalBackgroundTheme.current.surfaceOverlayColor, RoundedCornerShape(12.dp))
-            .padding(8.dp),
+            .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         val itemTheme = LocalBackgroundTheme.current
@@ -1186,22 +1260,32 @@ private fun CartListItem(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val atLimit = cartItem.quantity >= quantityLimit.maxQuantity
-                    IconButton(
-                        onClick = { onUpdateQuantity(cartItem, cartItem.quantity - 1) },
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Remove,
-                            contentDescription = CartPresentation.decreaseContentDescription(
-                                cartItem.menuItem,
-                                cartItem.selectedSize
-                            ),
-                            tint = itemTheme.accentColor,
-                            modifier = Modifier.size(22.dp)
-                        )
+                    // Circular neumorphic stepper and remove controls, matching the +/− buttons
+                    // in the item detail overlay. The IconButtons are made transparent so the
+                    // raised card behind them is what actually shows — a tonal button painted its
+                    // own container and flattened the effect, the same problem the size chips had.
+                    GlassCard(shape = CircleShape, elevation = 2.dp) {
+                        IconButton(
+                            onClick = { onUpdateQuantity(cartItem, cartItem.quantity - 1) },
+                            modifier = Modifier.size(48.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = itemTheme.accentColor
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Remove,
+                                contentDescription = CartPresentation.decreaseContentDescription(
+                                    cartItem.menuItem,
+                                    cartItem.selectedSize
+                                ),
+                                tint = itemTheme.accentColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
 
                     Text(
@@ -1211,49 +1295,64 @@ private fun CartListItem(
                         fontWeight = FontWeight.Bold
                     )
 
-                    IconButton(
-                        onClick = { onUpdateQuantity(cartItem, cartItem.quantity + 1) },
-                        enabled = !atLimit,
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = CartPresentation.increaseContentDescription(
-                                item = cartItem.menuItem,
-                                selectedSize = cartItem.selectedSize,
-                                atLimit = atLimit,
-                                limit = quantityLimit
-                            ),
-                            tint = itemTheme.accentColor,
-                            modifier = Modifier.size(22.dp)
-                        )
+                    GlassCard(shape = CircleShape, elevation = 2.dp) {
+                        IconButton(
+                            onClick = { onUpdateQuantity(cartItem, cartItem.quantity + 1) },
+                            enabled = !atLimit,
+                            modifier = Modifier.size(48.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = itemTheme.accentColor,
+                                disabledContentColor = itemTheme.secondaryTextColor.copy(alpha = 0.5f)
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = CartPresentation.increaseContentDescription(
+                                    item = cartItem.menuItem,
+                                    selectedSize = cartItem.selectedSize,
+                                    atLimit = atLimit,
+                                    limit = quantityLimit
+                                ),
+                                tint = itemTheme.accentColor,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
 
-                    IconButton(
-                        onClick = { onRemove(cartItem) },
-                        modifier = Modifier.size(48.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Remove ${cartItem.menuItem.name}",
-                            tint = Color.Red.copy(alpha = 0.7f),
-                            modifier = Modifier.size(22.dp)
-                        )
+                    GlassCard(shape = CircleShape, elevation = 2.dp) {
+                        IconButton(
+                            onClick = { onRemove(cartItem) },
+                            modifier = Modifier.size(48.dp),
+                            colors = IconButtonDefaults.iconButtonColors(
+                                containerColor = Color.Transparent,
+                                contentColor = Color.Red.copy(alpha = 0.7f)
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Remove ${cartItem.menuItem.name}",
+                                tint = Color.Red.copy(alpha = 0.7f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
                 }
             }
         }
+    }
     }
 }
 
 @Composable
 private fun CheckoutOverlay(
     viewModel: MenuViewModel,
+    customerName: String,
+    onCustomerNameChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onOrderConfirmed: (Order) -> Unit
 ) {
     val cartItems by viewModel.cartItems.collectAsState()
-    var customerName by remember { mutableStateOf("") }
 
     Box(
         modifier = Modifier
@@ -1307,7 +1406,7 @@ private fun CheckoutOverlay(
                 // ─── Customer Name Input ─────────────────────────────
                 OutlinedTextField(
                     value = customerName,
-                    onValueChange = { customerName = it },
+                    onValueChange = onCustomerNameChange,
                     label = { Text("Customer Name") },
                     singleLine = true,
                     modifier = Modifier

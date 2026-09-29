@@ -101,31 +101,73 @@ class CartPresentationTest {
     }
 
     @Test
-    fun `limit explanation distinguishes stock from the order ceiling`() {
-        val fromStock = CartPresentation.limitExplanation(
-            coffee,
-            "Large",
+    fun `availability text reports tracked stock for the selected size`() {
+        val fromStock = CartPresentation.availabilityText(
             MenuQuantityRules.quantityLimit(mapOf("Large" to 4), "Large")
         )
-        assertTrue(fromStock!!.contains("4 left in stock"))
+        assertEquals("4 left in stock", fromStock)
 
-        val fromCeiling = CartPresentation.limitExplanation(
-            coffee,
-            "Large",
+        // A well-stocked item reports its real stock, not the 99-per-order ceiling: the
+        // ceiling is a submission guard, not something a customer needs to reason about.
+        val fromCeiling = CartPresentation.availabilityText(
             MenuQuantityRules.quantityLimit(mapOf("Large" to 150), "Large")
         )
-        assertTrue(fromCeiling!!.contains("150") && fromCeiling.contains("99 per order"))
+        assertEquals("150 left in stock", fromCeiling)
+        assertEquals(99, MenuQuantityRules.quantityLimit(mapOf("Large" to 150), "Large").maxQuantity)
 
-        val untracked = CartPresentation.limitExplanation(
-            coffee,
-            "Large",
-            MenuQuantityRules.quantityLimit(null, "Large")
+        val outOfStock = CartPresentation.availabilityText(
+            MenuQuantityRules.quantityLimit(mapOf("Large" to 0), "Large")
         )
-        assertEquals("Max 99 per order", untracked)
+        assertEquals("Out of stock", outOfStock)
     }
 
     @Test
-    fun `unknown availability text is explicit`() {
+    fun `availability text is explicit when inventory is untracked`() {
+        assertEquals(
+            CartPresentation.UNKNOWN_AVAILABILITY,
+            CartPresentation.availabilityText(
+                MenuQuantityRules.quantityLimit(null, "Large")
+            )
+        )
         assertEquals("Availability checked when ordering", CartPresentation.UNKNOWN_AVAILABILITY)
+    }
+
+    @Test
+    fun `overlay line subtotal multiplies the size-adjusted unit price by the stepper value`() {
+        // The overlay shows effectivePrice (base + size modifier) with a quantity stepper, and
+        // used to display only the unit price — so 3 items still read as one.
+        assertEquals(375.0, CartPresentation.lineSubtotal(125.0, 3), 0.0)
+        assertEquals(125.0, CartPresentation.lineSubtotal(125.0, 1), 0.0)
+    }
+
+    @Test
+    fun `overlay line subtotal never goes negative`() {
+        assertEquals(0.0, CartPresentation.lineSubtotal(125.0, 0), 0.0)
+        assertEquals(0.0, CartPresentation.lineSubtotal(125.0, -4), 0.0)
+    }
+
+    @Test
+    fun `availability text names the count and says it is stock`() {
+        // "1 available" was ambiguous next to the price and the stepper.
+        assertEquals(
+            "1 left in stock",
+            CartPresentation.availabilityText(MenuQuantityRules.quantityLimit(mapOf("Medium" to 1), "Medium"))
+        )
+        assertEquals(
+            "7 left in stock",
+            CartPresentation.availabilityText(MenuQuantityRules.quantityLimit(mapOf("Large" to 7), "Large"))
+        )
+    }
+
+    @Test
+    fun `availability text covers unknown and sold out`() {
+        assertEquals(
+            CartPresentation.UNKNOWN_AVAILABILITY,
+            CartPresentation.availabilityText(MenuQuantityRules.quantityLimit(null, "Medium"))
+        )
+        assertEquals(
+            "Out of stock",
+            CartPresentation.availabilityText(MenuQuantityRules.quantityLimit(mapOf("Medium" to 0), "Medium"))
+        )
     }
 }

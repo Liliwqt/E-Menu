@@ -79,6 +79,40 @@ sealed class BackgroundTheme(
     val onErrorContainer: Color
 ) {
 
+    /** Fixed native palette. Saved branch theme preferences remain in Firebase. */
+    data object SoftLight : BackgroundTheme(
+        backgroundColor = Color(0xFFE2E7EB),
+        primaryTextColor = Color(0xFF202428),
+        secondaryTextColor = Color(0xFF505860),
+        accentColor = Color(0xFF202428),
+        glassBorderColor = Color(0xFF89949C),
+        glassBorderGradientStart = Color(0xFF89949C),
+        glassBorderGradientEnd = Color(0xFF89949C),
+        glassGradientStart = Color.Transparent,
+        glassGradientEnd = Color.Transparent,
+        surfaceOverlayColor = Color(0xFFE4E9EC),
+        surfaceColor = Color(0xFFF3F5F6),
+        buttonContainerColor = Color(0xFF202428),
+        buttonContentColor = Color.White,
+        categorySelectedColor = Color(0xFF202428),
+        categoryUnselectedColor = Color(0xFF505860),
+        primaryContainer = Color(0xFFD8DEE2),
+        onPrimaryContainer = Color(0xFF202428),
+        secondaryContainer = Color(0xFFD8DEE2),
+        onSecondaryContainer = Color(0xFF202428),
+        tertiaryContainer = Color(0xFFD8DEE2),
+        onTertiaryContainer = Color(0xFF202428),
+        surfaceContainerLowest = Color(0xFFF9FAFB),
+        surfaceContainerLow = Color(0xFFF3F5F6),
+        surfaceContainer = Color(0xFFE2E7EB),
+        surfaceContainerHigh = Color(0xFFE4E9EC),
+        surfaceContainerHighest = Color(0xFFD8DEE2),
+        outlineColor = Color(0xFF727D85),
+        outlineVariantColor = Color(0xFF89949C),
+        errorContainer = Color(0xFFF8E4E1),
+        onErrorContainer = Color(0xFF842C25)
+    )
+
     // ── Dark ─────────────────────────────────────────────────────────
     data object Dark : BackgroundTheme(
         backgroundColor = DarkBackground,

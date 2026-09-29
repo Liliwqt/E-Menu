@@ -6,11 +6,13 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.WindowCompat
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.androidkiosk.admin.PinManager
@@ -102,6 +104,12 @@ class MainActivity : ComponentActivity() {
             val adminUnlocked by isAdminUnlocked.collectAsState()
             val currentUnlockMethod by unlockMethod.collectAsState()
             val currentSurface by surface.collectAsState()
+            SideEffect {
+                // Native light screens need dark system icons; keep the portal's own style.
+                val systemBars = WindowCompat.getInsetsController(window, window.decorView)
+                systemBars.isAppearanceLightStatusBars = currentSurface == AppSurface.MENU
+                systemBars.isAppearanceLightNavigationBars = currentSurface == AppSurface.MENU
+            }
 
             // Determine if reduced motion accessibility setting is enabled
             val reducedMotion = getReducedMotionPreference()

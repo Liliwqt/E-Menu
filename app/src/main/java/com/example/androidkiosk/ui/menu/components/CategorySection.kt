@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -35,7 +37,7 @@ import com.example.androidkiosk.ui.theme.LocalBackgroundTheme
 import com.example.androidkiosk.util.ImageUrlValidator
 import java.util.Locale
 
-/** A glassmorphism menu item card showing an image, name, and price. */
+/** A soft-surface menu item card showing an image, name, and price. */
 @Composable
 fun MenuItemCard(
     item: MenuItem,
@@ -46,7 +48,7 @@ fun MenuItemCard(
     val theme = LocalBackgroundTheme.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val cardAlpha = if (item.available) 1f else 0.45f
+    val isFocused by interactionSource.collectIsFocusedAsState()
 
     // Spring-based press scale animation
     val scale by animateFloatAsState(
@@ -58,13 +60,12 @@ fun MenuItemCard(
         label = "cardScale"
     )
 
-GlassCard(
+    GlassCard(
         modifier = modifier
             .aspectRatio(0.75f)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                alpha = cardAlpha
             }
             .clickable(
                 enabled = item.available,
@@ -75,9 +76,11 @@ GlassCard(
                 ),
                 onClick = onClick
             ),
-        shape = MaterialTheme.shapes.medium,
-        elevation = 1.dp,
-        useTonalSurface = true
+        shape = MaterialTheme.shapes.large,
+        backgroundColor = theme.backgroundColor,
+        borderWidth = 2.dp,
+        borderColor = if (isFocused) theme.primaryTextColor else Color.Transparent,
+        elevation = 3.dp
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -94,7 +97,7 @@ GlassCard(
                     .fillMaxWidth()
                     .height(0.dp)
                     .weight(0.65f)
-                    .padding(bottom = 8.dp),
+                    .padding(8.dp),
                 contentScale = ContentScale.Crop,
                 error = painterResource(R.drawable.menu_item_placeholder)
             )
@@ -118,7 +121,7 @@ GlassCard(
                 )
                 Text(
                     text = "₱${String.format(Locale.getDefault(), "%.2f", item.price)}",
-                    style = MaterialTheme.typography.titleSmall,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = if (item.available) theme.accentColor else theme.secondaryTextColor
                 )
