@@ -195,6 +195,24 @@ class MenuViewModelTest {
     }
 
     @Test
+    fun `server price rejection keeps cart and tells customer to review it`() = runTest(dispatcher) {
+        val viewModel = createViewModel()
+        advanceUntilIdle()
+        viewModel.addToCartWithQuantity(sizedItem, 1, "Medium")
+        val order = viewModel.confirmOrder("Guest")
+        orderRepository.nextResult = Result.failure(
+            IllegalStateException("An item price changed; refresh the menu")
+        )
+
+        viewModel.submitOrder(order, PaymentMethod.COUNTER, PaymentStatus.PAY_AT_COUNTER)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.cartItems.value.isNotEmpty())
+        assertTrue(viewModel.submissionState.value.errorMessage?.contains("price changed") == true)
+        assertFalse(viewModel.submissionState.value.isComplete)
+    }
+
+    @Test
     fun `authorization revocation preserves cart and blocks submission`() = runTest(dispatcher) {
         val viewModel = createViewModel()
         advanceUntilIdle()

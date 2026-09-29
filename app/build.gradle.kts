@@ -14,6 +14,9 @@ val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) load(keystorePropertiesFile.inputStream())
 }
+val orderApiUrl = providers.gradleProperty("orderApiUrl")
+    .orElse("https://e-menu-web-production.up.railway.app")
+    .get()
 val adminPanelUrl = providers.gradleProperty("adminPanelUrl")
     .orElse("https://touch-menu-web.online")
     .get()
@@ -35,11 +38,12 @@ android {
         applicationId = "com.example.androidkiosk"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "ADMIN_PANEL_URL", "\"$adminPanelUrl\"")
+        buildConfigField("String", "ORDER_API_URL", "\"$orderApiUrl\"")
         buildConfigField("String", "DEFAULT_COMPANY_ID", "\"$defaultCompanyId\"")
         buildConfigField("String", "DEFAULT_BRANCH_ID", "\"$defaultBranchId\"")
 

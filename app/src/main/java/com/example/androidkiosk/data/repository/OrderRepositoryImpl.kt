@@ -1,9 +1,9 @@
 package com.example.androidkiosk.data.repository
 
+import com.example.androidkiosk.BuildConfig
 import com.example.androidkiosk.admin.AuthManager
 import com.example.androidkiosk.domain.repository.OrderRepository
 import com.example.androidkiosk.model.Order
-import com.example.androidkiosk.model.OrderLogEntry
 import com.example.androidkiosk.model.PaymentMethod
 import com.example.androidkiosk.model.PaymentStatus
 import com.google.firebase.database.FirebaseDatabase
@@ -14,10 +14,17 @@ import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import com.google.firebase.database.ServerValue
 import kotlinx.coroutines.tasks.await
 import timber.log.Timber
 import java.util.UUID
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.math.abs
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -71,70 +78,54 @@ class OrderRepositoryImpl @Inject constructor(
     override suspend fun submitOrder(order: Order): Result<Unit> {
         return try {
             validateOrder(order)
-
             check(authManager.authorizationState.value.isAuthorized) {
                 "This device is not registered"
             }
-
-            val entitlement = database.getReference(
-                "billingEntitlements/${branchPathProvider.companyId}/${branchPathProvider.branchId}"
-            ).get().await()
-            val expiresAt = entitlement.child("periodEndAt").getValue(Long::class.java) ?: 0L
-            val planStatus = entitlement.child("subscriptionStatus").getValue(String::class.java)
-            check(planStatus in listOf("trialing", "active") && expiresAt > System.currentTimeMillis()) {
-                "Branch plan expired. Ordering is paused until the owner renews."
-            }
-
-            requireNotNull(order.paymentMethod) { "Payment method is required" }
-            requireNotNull(order.paymentStatus) { "Payment status is required" }
-
-            val orderRef = database.getReference("${branchPathProvider.branchPath}/logs/${order.id}")
-            if (orderRef.get().await().exists()) {
-                Timber.i("Order %s was already submitted", order.orderNumber)
-                return Result.success(Unit)
-            }
-
-            val userId = requireNotNull(authManager.userId) { "Authenticated user is unavailable" }
-            val entry = OrderLogEntry.fromOrder(order, userId)
-            val updates = mutableMapOf<String, Any>()
-
-            updates["${branchPathProvider.branchPath}/logs/${order.id}"] = entry.toMap()
-
-            // Re-read stock immediately before submission. Missing item records are legacy/untracked;
-            // existing item records must contain the selected size and have enough stock.
-            val inventory = FirebaseMenuMapper.parseInventory(
-                database.getReference("${branchPathProvider.branchPath}/inventory").get().await().value
-            )
-            val quantitiesByStockPath = order.items.groupingBy { item ->
-                val size = item.selectedSize.ifEmpty { DEFAULT_STOCK_SIZE }
-                "${item.menuItem.categoryName}/${item.menuItem.id}/$size"
-            }.fold(0) { total, item -> total + item.quantity }
-
-            for ((stockKey, quantity) in quantitiesByStockPath) {
-                val parts = stockKey.split('/', limit = 3)
-                val itemKey = "${parts[0]}/${parts[1]}"
-                val knownItemStock = inventory[itemKey] ?: continue
-                val currentStock = requireNotNull(knownItemStock[parts[2]]) {
-                    "Selected size is not tracked in inventory"
+            val token = authManager.idToken()
+            val body = orderRequestJson(order, branchPathProvider.companyId, branchPathProvider.branchId)
+            val response = withContext(Dispatchers.IO) {
+                val connection = (URL(BuildConfig.ORDER_API_URL.trimEnd('/') + "/api/orders")
+                    .openConnection() as HttpURLConnection)
+                try {
+                    connection.requestMethod = "POST"
+                    connection.connectTimeout = 10000
+                    connection.readTimeout = 25000
+                    connection.doOutput = true
+                    connection.setRequestProperty("Authorization", "Bearer $token")
+                    connection.setRequestProperty("Content-Type", "application/json")
+                    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                    val status = connection.responseCode
+                    val responseText = (if (status in 200..299) connection.inputStream
+                    else connection.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    if (status !in 200..299) {
+                        val detail = runCatching {
+                            Json.parseToJsonElement(responseText).jsonObject["detail"]
+                                ?.jsonPrimitive?.content
+                        }.getOrNull()
+                        error(detail ?: "Order service unavailable ($status). Retry with the same order.")
+                    }
+                    responseText
+                } finally {
+                    connection.disconnect()
                 }
-                require(currentStock >= quantity) { "Insufficient inventory stock" }
-                updates["${branchPathProvider.branchPath}/inventory/${parts[0]}/${parts[1]}/sizes/${parts[2]}/stock"] =
-                    ServerValue.increment(-quantity.toLong())
             }
-
-            // The log and all tracked stock decrements are one multi-location write.
-            database.getReference().updateChildren(updates).await()
-
-            Timber.i("Order %s submitted and inventory updated", order.orderNumber)
+            val result = Json.parseToJsonElement(response).jsonObject
+            check(result["orderId"]?.jsonPrimitive?.content == order.id) {
+                "Order confirmation did not match the submitted order"
+            }
+            check(result["orderNumber"]?.jsonPrimitive?.content == order.orderNumber) {
+                "Order confirmation number did not match"
+            }
+            Timber.i("Order %s submitted through trusted checkout", order.orderNumber)
             Result.success(Unit)
-        } catch (e: Exception) {
-            if (e.message?.contains("permission denied", ignoreCase = true) == true &&
-                (_subscriptionEndAt.value ?: 0L) > System.currentTimeMillis()
-            ) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (error.message?.contains("Device registration is inactive") == true) {
                 authManager.reportAuthorizationDenied()
             }
-            Timber.e(e, "Failed to submit order %s", order.orderNumber)
-            Result.failure(e)
+            Timber.e(error, "Failed to submit order %s", order.orderNumber)
+            Result.failure(error)
         }
     }
 

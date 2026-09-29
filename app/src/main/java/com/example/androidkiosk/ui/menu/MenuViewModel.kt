@@ -265,8 +265,16 @@ class MenuViewModel @Inject constructor(
                     Timber.e(error, "Failed to submit order %s", submittedOrder.orderNumber)
                     _submissionState.value = OrderSubmissionState(
                         orderId = submittedOrder.id,
-                        errorMessage = if (error.message?.contains("plan expired", ignoreCase = true) == true)
-                            error.message else "Unable to submit the order. Check the connection and try again."
+                        errorMessage = when {
+                            error.message?.contains("plan expired", ignoreCase = true) == true -> error.message
+                            error.message?.contains("price changed", ignoreCase = true) == true ->
+                                "An item price changed. Return to the menu and review the cart."
+                            error.message?.contains("unavailable", ignoreCase = true) == true ->
+                                "An item is no longer available. Return to the menu and review the cart."
+                            error.message?.contains("insufficient inventory", ignoreCase = true) == true ->
+                                "Some items no longer have enough stock. Return to the cart and update the order."
+                            else -> "Unable to submit the order. Check the connection and try again."
+                        }
                     )
                 }
         }

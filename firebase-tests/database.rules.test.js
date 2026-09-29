@@ -207,7 +207,7 @@ test("company owner can delete a branch; non-owner cannot", async () => {
   await assertFails(remove(ref(stranger, `${companyId}/branches/${branchId}`)));
 });
 
-test("an enrolled kiosk can write only its assigned branch order and stock update", async () => {
+test("an enrolled device can read its branch but cannot write orders or stock", async () => {
   const manager = testEnv.authenticatedContext(managerUid).database();
   const kioskDb = kiosk(companyKioskUid);
   await assertSucceeds(set(ref(manager, `${companyId}/branches/${branchId}/kiosks/${companyKioskUid}`), {
@@ -218,7 +218,7 @@ test("an enrolled kiosk can write only its assigned branch order and stock updat
 
   const id = "123e4567-e89b-12d3-a456-426614174001";
   const order = validOrder(companyKioskUid, id);
-  await assertSucceeds(update(ref(kioskDb), {
+  await assertFails(update(ref(kioskDb), {
     [`${companyId}/branches/${branchId}/logs/${id}`]: order,
     [`${companyId}/branches/${branchId}/inventory/Drinks/coffee/sizes/Medium/stock`]: 4,
   }));
@@ -876,6 +876,50 @@ test("a branch manager can take staff off the roster but not the owner", async (
   await assertFails(remove(ref(manager, `${companyId}/users/${managerUid}`)));
 });
 
+
+test("devices cannot self-enroll or reactivate and branch members cannot read another branch", async () => {
+  const outsider = testEnv.authenticatedContext(outsiderUid).database();
+  const device = kiosk(enabledUid);
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  await assertFails(set(ref(outsider, `${branchPath}/kiosks/${outsiderUid}`), {
+    kioskUid: outsiderUid, name: 'Forged', isActive: true,
+  }));
+  await assertFails(update(ref(device, `${branchPath}/kiosks/${enabledUid}`), { isActive: true }));
+  await assertSucceeds(update(ref(staff, `${companyId}/users/${staffUid}/branchIds`), {
+    [otherBranchId]: true,
+  }));
+  await assertFails(get(ref(staff, `${companyId}/branches/${otherBranchId}/logs`)));
+  await assertFails(get(ref(staff, `${companyId}/branches/${otherBranchId}/branchProfile`)));
+  await assertFails(get(ref(manager, `${companyId}/branches/${otherBranchId}/inventory`)));
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    await set(ref(context.database(), `${companyId}/kioskEnrollments/other-device`), {
+      kioskUid: 'other-device', companyId, branchId: otherBranchId,
+      isActive: true, name: 'Other device', registeredAt: Date.now(),
+    });
+  });
+  await assertFails(get(ref(staff, `${companyId}/kioskEnrollments/other-device`)));
+  await assertSucceeds(get(ref(staff, `${branchPath}/inventory`)));
+  await assertSucceeds(get(ref(owner, `${companyId}/branches/${otherBranchId}/inventory`)));
+});
+
+test("staff can restock existing sizes but cannot edit inventory structure or settings", async () => {
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const device = kiosk(enabledUid);
+  const size = `${branchPath}/inventory/Drinks/coffee/sizes/Medium`;
+  await assertSucceeds(update(ref(staff, size), {
+    stock: 7, currentStock: 7, lastUpdated: new Date().toISOString(),
+    lastModifiedBy: staffUid,
+  }));
+  await assertFails(set(ref(staff, `${size}/threshold`), 1));
+  await assertFails(set(ref(staff, `${branchPath}/inventory/Drinks/new-item`), { stock: 10 }));
+  await assertFails(set(ref(staff, `${branchPath}/appSettings/currency`), 'USD'));
+  await assertFails(set(ref(device, `${size}/stock`), 1));
+  await assertSucceeds(update(ref(manager, `${branchPath}/inventory/Drinks/coffee`), { threshold: 2 }));
+});
+
 test("the rules mirrored into the kiosk repo match the ones actually deployed", () => {
   // The kiosk project keeps a copy of the policy at its root so it documents the
   // rules it runs under. That copy is what drift made dangerous: it sat for two
@@ -901,10 +945,8 @@ test("the rules mirrored into the kiosk repo match the ones actually deployed", 
 // ledger, the flag records who set it and why, and it can be lifted again.
 //
 // It lives in its own node rather than on the order itself. Writing it onto the
-// order would mean relaxing the .write rule on /logs, which currently allows
-// exactly one thing - a kiosk creating an order that does not exist yet. That
-// rule is what makes kiosk orders immutable, and an adjustment is not worth
-// trading it away.
+// order would mean relaxing the .write rule on /logs. Client writes to
+// that ledger are denied; only the trusted order service creates records.
 
 const exclusion = (orderId, uid) => ({
   excluded: true,
@@ -1174,7 +1216,7 @@ test("a manager can switch a kiosk off and on across every record the portal wri
   // Switched back on, the same tablet works again — the whole point of the
   // Enable button, which used to leave the root pointer off.
   await flip(true);
-  await assertSucceeds(set(ref(kioskDb, `${branchPath}/logs/${id}`), validOrder(toggledKioskUid, id)));
+  await assertFails(set(ref(kioskDb, `${branchPath}/logs/${id}`), validOrder(toggledKioskUid, id)));
 });
 
 test('staff can patch availability without gaining menu editing access', async () => {

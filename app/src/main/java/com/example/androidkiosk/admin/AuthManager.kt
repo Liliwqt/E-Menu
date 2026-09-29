@@ -48,6 +48,10 @@ class AuthManager @Inject constructor(
     val userId: String?
         get() = firebaseAuth.currentUser?.uid
 
+    suspend fun idToken(): String = requireNotNull(
+        firebaseAuth.currentUser?.getIdToken(false)?.await()?.token
+    ) { "Device sign-in is unavailable" }
+
     private val authStateListener = FirebaseAuth.AuthStateListener { auth ->
         observeRegistration(auth.currentUser)
     }
