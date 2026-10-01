@@ -1,6 +1,8 @@
 package com.example.androidkiosk.ui.admin
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.net.http.SslError
 import android.os.Handler
 import android.os.Looper
@@ -14,6 +16,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -200,7 +203,7 @@ private fun loadUrlSafely(view: WebView?, target: String) {
 }
 
 @SuppressLint("SetJavaScriptEnabled")
-private fun configurePanelWebView(
+internal fun configurePanelWebView(
     webView: WebView,
     panelUrl: String,
     onLoadingChanged: (Boolean) -> Unit,
@@ -239,6 +242,20 @@ private fun configurePanelWebView(
     webView.webChromeClient = WebChromeClient()
     webView.webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            if (AdminPanelNavigationPolicy.isSupportEmailRequest(
+                    request.url.toString(), view.url, panelUrl,
+                    request.isForMainFrame, request.hasGesture()
+                )) {
+                try {
+                    view.context.startActivity(Intent(Intent.ACTION_SENDTO, request.url)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (_: ActivityNotFoundException) {
+                    Toast.makeText(view.context, "No email app found. Email touch.support1@gmail.com from another device.", Toast.LENGTH_LONG).show()
+                } catch (_: SecurityException) {
+                    Toast.makeText(view.context, "Could not open email. Contact touch.support1@gmail.com.", Toast.LENGTH_LONG).show()
+                }
+                return true
+            }
             val allowed = AdminPanelNavigationPolicy.isAllowed(request.url.toString(), panelUrl)
             if (!allowed) onError("Blocked navigation to an untrusted address.")
             return !allowed

@@ -22,4 +22,24 @@ class AdminPanelNavigationPolicyTest {
         assertFalse(AdminPanelNavigationPolicy.isAllowed("https://example.com", panelUrl))
         assertFalse(AdminPanelNavigationPolicy.isAllowed("https://untrusted.web.app", panelUrl))
     }
+
+    @Test
+    fun `support email needs a user gesture in the trusted main frame`() {
+        val url = "mailto:touch.support1@gmail.com?subject=Cancel&body=Branch%3A%20one%0ATwo"
+        assertTrue(AdminPanelNavigationPolicy.isSupportEmailRequest(url, "$panelUrl/subscription/one", panelUrl, true, true))
+        assertFalse(AdminPanelNavigationPolicy.isSupportEmailRequest(url, panelUrl, panelUrl, true, false))
+        assertFalse(AdminPanelNavigationPolicy.isSupportEmailRequest(url, panelUrl, panelUrl, false, true))
+        assertFalse(AdminPanelNavigationPolicy.isSupportEmailRequest(url, "https://untrusted.web.app", panelUrl, true, true))
+        assertFalse(AdminPanelNavigationPolicy.isSupportEmailRequest(url, null, panelUrl, true, true))
+    }
+
+    @Test
+    fun `support email cannot add recipients or inject subject headers`() {
+        for (url in listOf("mailto:other@example.com", "mailto:touch.support1@gmail.com,other@example.com",
+            "mailto:touch.support1@gmail.com?bcc=other@example.com", "mailto:touch.support1@gmail.com?subject=Cancel%0Abcc%3Aother@example.com",
+            "intent://touch.support1@gmail.com", "mailto:touch.support1@gmail.com#fragment")) {
+            assertFalse(url, AdminPanelNavigationPolicy.isSupportEmailRequest(url, panelUrl, panelUrl, true, true))
+        }
+        assertFalse(AdminPanelNavigationPolicy.isAllowed("mailto:touch.support1@gmail.com", panelUrl))
+    }
 }
