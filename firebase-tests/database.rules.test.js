@@ -1401,3 +1401,13 @@ test('maintenance stops writes and tombstones block branch recreation', async ()
   });
   await assertFails(update(ref(db, `${branchPath}/branchProfile`), { branchName: 'Recreate' }));
 });
+
+test('AI control leases and request tracking are never client-readable or writable', async () => {
+  for (const uid of [managerUid, branchManagerUid, staffUid, outsiderUid]) {
+    const db = testEnv.authenticatedContext(uid).database();
+    for (const path of ['aiControls', `aiUsage/${companyId}/${branchId}`, `aiRequests/${companyId}/${branchId}`]) {
+      await assertFails(get(ref(db, path)));
+      await assertFails(set(ref(db, path), { count: 0 }));
+    }
+  }
+});
