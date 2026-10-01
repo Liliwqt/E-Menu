@@ -11,7 +11,7 @@ import { get, ref, set, update, remove } from "firebase/database";
 
 const projectId = "demo-menu-kiosk";
 const rules = fs.readFileSync(
-  path.resolve("../../AI-Operations-Management-Platform-main/database.rules.json"),
+  new URL("./database.rules.json", import.meta.url),
   "utf8"
 );
 const enabledUid = process.env.KIOSK_UID_1 ?? "REPLACE_WITH_KIOSK_UID_1";
