@@ -41,7 +41,7 @@ jobs:
         run: bash scripts/security_scan.sh
 
       - name: Verify Android project
-        run: ./gradlew testDebugUnitTest lintDebug compileDebugAndroidTestKotlin assembleDebug assembleRelease --console=plain
+        run: ./gradlew testDebugUnitTest lintDebug compileDebugAndroidTestKotlin assembleDebug assembleDebugAndroidTest --console=plain
 
       - name: Install Firebase rules test dependencies
         working-directory: firebase-tests

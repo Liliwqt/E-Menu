@@ -18,7 +18,8 @@ import timber.log.Timber
  */
 class DeviceWebBridge(
     private val onEnterMenuMode: (companyId: String, branchId: String) -> Unit,
-    private val deviceUidProvider: () -> String = { "" }
+    private val deviceUidProvider: () -> String = { "" },
+    private val onOpenRecords: (branchId: String) -> Unit = {}
 ) {
     @JavascriptInterface
     fun isEmbedded(): Boolean = true
@@ -26,6 +27,14 @@ class DeviceWebBridge(
     /** The device's anonymous Firebase Auth UID (used to register this device). */
     @JavascriptInterface
     fun getDeviceUid(): String = deviceUidProvider()
+
+    /** Opens only a fixed portal records route, never transfers authentication tokens. */
+    @JavascriptInterface
+    fun openRecordsInBrowser(branchId: String) {
+        if (Regex("^branch-[a-z0-9-]+$").matches(branchId) && branchId.length <= 120) {
+            onOpenRecords(branchId)
+        }
+    }
 
     // NOTE: the method name `enterKioskMode` is part of the JavaScript contract
     // (`window.AndroidKiosk.enterKioskMode`) and must not be renamed without

@@ -197,12 +197,12 @@ test("branch owner can enroll a kiosk and only that kiosk can read enrollment", 
   await assertFails(get(ref(otherKioskDb, `kioskEnrollments/${companyKioskUid}`)));
 });
 
-test("company owner can delete a branch; non-owner cannot", async () => {
+test("branch deletion requires the trusted lifecycle service", async () => {
   const manager = testEnv.authenticatedContext(managerUid).database();
   const stranger = testEnv.authenticatedContext("stranger").database();
 
   // Owner (in companyProfile.ownerUids) may remove the whole branch node.
-  await assertSucceeds(remove(ref(manager, `${companyId}/branches/${otherBranchId}`)));
+  await assertFails(remove(ref(manager, `${companyId}/branches/${otherBranchId}`)));
   // A stranger cannot remove a branch.
   await assertFails(remove(ref(stranger, `${companyId}/branches/${branchId}`)));
 });
@@ -1339,4 +1339,65 @@ test('a future timestamp with inactive status cannot authorize writes', async ()
     });
   });
   await assertFails(set(ref(owner, `${branchPath}/appSettings/backgroundTheme`), 'Dark'));
+});
+
+
+test('payment credentials and provider records are server-only', async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const manager = testEnv.authenticatedContext(branchManagerUid).database();
+  const device = kiosk(enabledUid);
+  for (const db of [owner, manager, device]) {
+    await assertFails(get(ref(db, `paymentMerchantConnections/${companyId}`)));
+    await assertFails(set(ref(db, 'paymentIntentIndex/pi_test'), { companyId, branchId, orderId: 'x' }));
+    await assertFails(get(ref(db, 'paymentReservationIndex/order-test')));
+    await assertFails(get(ref(db, 'paymentCheckoutSecrets/order-test')));
+    await assertFails(set(ref(db, 'paymentCheckoutSecrets/order-test'), { qrImage: 'secret' }));
+    await assertFails(get(ref(db, `paymentRefunds/${companyId}/${branchId}/order-test`)));
+    await assertFails(set(ref(db, 'paymentWebhookEvents/evt_test'), { receivedAt: Date.now() }));
+  }
+});
+
+test('lifecycle metadata and private jobs cannot be forged by owners or staff', async () => {
+  const owner = testEnv.authenticatedContext(managerUid).database();
+  const staff = testEnv.authenticatedContext(staffUid).database();
+  await assertFails(set(ref(owner, `${branchPath}/lifecycle`), { status: 'active' }));
+  await assertFails(set(ref(staff, `${branchPath}/lifecycle/status`), 'active'));
+  await assertFails(set(ref(owner, 'lifecycleMaintenance/enabled'), false));
+  await assertFails(get(ref(owner, 'lifecycleExports')));
+});
+
+test('closing branch stays readable but owner manager and staff cannot write', async () => {
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    await set(ref(ctx.database(), `${branchPath}/lifecycle`), { status: 'closing', deleteAt: Date.now() + 10000 });
+  });
+  for (const uid of [managerUid, branchManagerUid, staffUid]) {
+    const db = testEnv.authenticatedContext(uid).database();
+    await assertSucceeds(get(ref(db, `${branchPath}/categories`)));
+    await assertFails(update(ref(db, `${branchPath}/categories/Drinks/coffee`), { available: false }));
+    await assertFails(update(ref(db, `${branchPath}/inventory/Drinks/coffee/sizes/Medium`), { stock: 4, lastModifiedBy: uid }));
+    await assertFails(set(ref(db, `${branchPath}/lifecycle/status`), 'active'));
+  }
+});
+
+test('cancelled entitlement rejects operational writes and cannot be restarted by owner', async () => {
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    await update(ref(ctx.database(), `billingEntitlements/${companyId}/${branchId}`), { subscriptionStatus: 'cancelled' });
+  });
+  const db = testEnv.authenticatedContext(managerUid).database();
+  await assertSucceeds(get(ref(db, `${branchPath}/inventory`)));
+  await assertFails(update(ref(db, `${branchPath}/categories/Drinks/coffee`), { available: false }));
+  await assertFails(update(ref(db, `billingEntitlements/${companyId}/${branchId}`), { subscriptionStatus: 'trialing' }));
+});
+
+test('maintenance stops writes and tombstones block branch recreation', async () => {
+  const db = testEnv.authenticatedContext(managerUid).database();
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    await set(ref(ctx.database(), 'lifecycleMaintenance/enabled'), true);
+  });
+  await assertFails(update(ref(db, `${branchPath}/categories/Drinks/coffee`), { available: false }));
+  await testEnv.withSecurityRulesDisabled(async ctx => {
+    await remove(ref(ctx.database(), 'lifecycleMaintenance'));
+    await set(ref(ctx.database(), `deletionTombstones/${companyId}/${branchId}`), { deletedAt: Date.now() });
+  });
+  await assertFails(update(ref(db, `${branchPath}/branchProfile`), { branchName: 'Recreate' }));
 });

@@ -228,7 +228,8 @@ fun AdminPinDialog(
                         .width(380.dp)
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
-                    elevation = 8.dp
+                    elevation = 0.dp,
+                    showFocusOutline = false
                 ) {
                     Column(
                         modifier = Modifier

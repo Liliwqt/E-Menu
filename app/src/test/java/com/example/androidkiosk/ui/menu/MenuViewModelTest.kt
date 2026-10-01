@@ -12,6 +12,7 @@ import com.example.androidkiosk.model.MenuItem
 import com.example.androidkiosk.model.Order
 import com.example.androidkiosk.model.PaymentMethod
 import com.example.androidkiosk.model.PaymentStatus
+import com.example.androidkiosk.model.QrCheckoutSession
 import com.example.androidkiosk.model.SizeOption
 import io.mockk.every
 import io.mockk.mockk
@@ -139,8 +140,8 @@ class MenuViewModelTest {
 
         viewModel.submitOrder(
             order,
-            PaymentMethod.QR_CODE,
-            PaymentStatus.CUSTOMER_REPORTED_PAID
+            PaymentMethod.COUNTER,
+            PaymentStatus.PAY_AT_COUNTER
         )
         advanceUntilIdle()
 
@@ -149,9 +150,9 @@ class MenuViewModelTest {
         assertFalse(viewModel.submissionState.value.isSubmitting)
         assertEquals(1, orderRepository.submittedOrders.size)
         assertEquals(order.id, orderRepository.submittedOrders.single().id)
-        assertEquals(PaymentMethod.QR_CODE, orderRepository.submittedOrders.single().paymentMethod)
+        assertEquals(PaymentMethod.COUNTER, orderRepository.submittedOrders.single().paymentMethod)
         assertEquals(
-            PaymentStatus.CUSTOMER_REPORTED_PAID,
+            PaymentStatus.PAY_AT_COUNTER,
             orderRepository.submittedOrders.single().paymentStatus
         )
     }
@@ -243,7 +244,7 @@ class MenuViewModelTest {
         advanceUntilIdle()
 
         assertTrue(viewModel.cartItems.value.isNotEmpty())
-        assertTrue(viewModel.submissionState.value.errorMessage?.contains("plan expired") == true)
+        assertTrue(viewModel.submissionState.value.errorMessage?.contains("expiry") == true)
         assertTrue(orderRepository.submittedOrders.isEmpty())
     }
 
@@ -286,29 +287,62 @@ class MenuViewModelTest {
     }
 
     @Test
-    fun `failed qr submission preserves cart and retry reuses stable id`() = runTest(dispatcher) {
+    fun `legacy direct qr submission is rejected without changing cart`() = runTest(dispatcher) {
         val viewModel = createViewModel()
         advanceUntilIdle()
         viewModel.addToCartWithQuantity(sizedItem, 1, "Large")
         val order = viewModel.confirmOrder("Guest")
-        orderRepository.nextResult = Result.failure(IllegalStateException("offline"))
 
         viewModel.submitOrder(order, PaymentMethod.QR_CODE, PaymentStatus.CUSTOMER_REPORTED_PAID)
         advanceUntilIdle()
 
         assertFalse(viewModel.cartItems.value.isEmpty())
-        assertTrue(viewModel.submissionState.value.errorMessage != null)
+        assertEquals("QR Ph orders must use the verified payment flow.", viewModel.submissionState.value.errorMessage)
+        assertTrue(orderRepository.submittedOrders.isEmpty())
+    }
 
-        orderRepository.nextResult = Result.success(Unit)
-        viewModel.submitOrder(order, PaymentMethod.QR_CODE, PaymentStatus.CUSTOMER_REPORTED_PAID)
-        advanceUntilIdle()
-
+    @Test
+    fun `verified qr waits for provider before clearing cart`() = runTest(dispatcher) {
+        val viewModel = createViewModel(); advanceUntilIdle()
+        viewModel.addToCartWithQuantity(sizedItem, 1, "Medium")
+        val order = viewModel.confirmOrder("Guest")
+        orderRepository.qrStart = Result.success(QrCheckoutSession(
+            order.id, order.orderNumber, order.total, "awaiting_payment", 99_999L, "data:image/png;base64,cXI="
+        ))
+        orderRepository.qrStatuses.add(QrCheckoutSession(order.id, order.orderNumber, order.total, "paid", 0L))
+        viewModel.startQrPayment(order); advanceUntilIdle()
         assertTrue(viewModel.submissionState.value.isComplete)
-        assertEquals(listOf(order.id, order.id), orderRepository.submittedOrders.map { it.id })
-        assertEquals(
-            listOf(PaymentMethod.QR_CODE, PaymentMethod.QR_CODE),
-            orderRepository.submittedOrders.map { it.paymentMethod }
-        )
+        assertEquals("paid", viewModel.submissionState.value.paymentStatus)
+        assertTrue(viewModel.cartItems.value.isEmpty())
+        assertEquals(listOf(order.id), orderRepository.startedQrOrders.map { it.id })
+    }
+
+    @Test
+    fun `interrupted qr creation retries the same order then polls confirmation`() = runTest(dispatcher) {
+        val viewModel = createViewModel(); advanceUntilIdle()
+        viewModel.addToCartWithQuantity(sizedItem, 1, "Medium")
+        val order = viewModel.confirmOrder("Guest")
+        orderRepository.qrStarts.add(Result.success(QrCheckoutSession(
+            order.id, order.orderNumber, order.total, "creating", 99_999L
+        )))
+        orderRepository.qrStarts.add(Result.success(QrCheckoutSession(
+            order.id, order.orderNumber, order.total, "awaiting_payment", 99_999L, "data:image/png;base64,cXI="
+        )))
+        orderRepository.qrStatuses.add(QrCheckoutSession(order.id, order.orderNumber, order.total, "paid", 0L))
+        viewModel.startQrPayment(order); advanceUntilIdle()
+        assertTrue(viewModel.submissionState.value.isComplete)
+        assertEquals(listOf(order.id, order.id), orderRepository.startedQrOrders.map { it.id })
+    }
+
+    @Test
+    fun `failed qr creation preserves cart and can be retried`() = runTest(dispatcher) {
+        val viewModel = createViewModel(); advanceUntilIdle()
+        viewModel.addToCartWithQuantity(sizedItem, 1, "Medium")
+        val order = viewModel.confirmOrder("Guest")
+        orderRepository.qrStart = Result.failure(IllegalStateException("QR Ph unavailable"))
+        viewModel.startQrPayment(order); advanceUntilIdle()
+        assertTrue(viewModel.cartItems.value.isNotEmpty())
+        assertTrue(viewModel.submissionState.value.errorMessage?.contains("unavailable") == true)
     }
 
     private fun createViewModel() = MenuViewModel(
@@ -323,10 +357,29 @@ class MenuViewModelTest {
         override val subscriptionEndAt: kotlinx.coroutines.flow.StateFlow<Long?> = subscriptionExpiry
         val submittedOrders = mutableListOf<Order>()
         var nextResult: Result<Unit> = Result.success(Unit)
+        var qrStart: Result<QrCheckoutSession> = Result.failure(IllegalStateException("unset"))
+        val qrStarts = ArrayDeque<Result<QrCheckoutSession>>()
+        val qrStatuses = ArrayDeque<QrCheckoutSession>()
+        val startedQrOrders = mutableListOf<Order>()
+        val cancelledQrOrders = mutableListOf<String>()
 
         override suspend fun submitOrder(order: Order): Result<Unit> {
             submittedOrders += order
             return nextResult
+        }
+
+        override suspend fun startQrCheckout(order: Order): Result<QrCheckoutSession> {
+            startedQrOrders += order
+            return qrStarts.removeFirstOrNull() ?: qrStart
+        }
+
+        override suspend fun getQrCheckout(orderId: String): Result<QrCheckoutSession> =
+            qrStatuses.removeFirstOrNull()?.let(Result.Companion::success)
+                ?: Result.failure(IllegalStateException("No QR status queued"))
+
+        override suspend fun cancelQrCheckout(orderId: String): Result<Unit> {
+            cancelledQrOrders += orderId
+            return Result.success(Unit)
         }
     }
 }

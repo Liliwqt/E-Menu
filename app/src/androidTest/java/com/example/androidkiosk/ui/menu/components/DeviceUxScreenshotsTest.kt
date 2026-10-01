@@ -9,6 +9,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.androidkiosk.model.MenuItem
@@ -113,6 +115,22 @@ class DeviceUxScreenshotsTest {
             }
         }
         capture("item-detail-unknown-inventory")
+    }
+
+    @Test
+    fun capturePortraitPaymentChoices() {
+        composeRule.setContent {
+            Harness {
+                PaymentMethodOverlay(
+                    order = order,
+                    onDismiss = {},
+                    onMethodSelected = {}
+                )
+            }
+        }
+        composeRule.onNodeWithText("QR Ph payment").assertIsDisplayed()
+        composeRule.onNodeWithText("Pay at Counter").assertIsDisplayed()
+        capture("portrait-payment-choices")
     }
 
     @Test

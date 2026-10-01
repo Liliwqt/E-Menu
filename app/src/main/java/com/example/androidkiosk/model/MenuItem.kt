@@ -46,6 +46,18 @@ enum class PaymentStatus {
     PAY_AT_COUNTER
 }
 
+data class QrCheckoutSession(
+    val orderId: String,
+    val orderNumber: String,
+    val total: Double,
+    val status: String,
+    val expiresAt: Long,
+    val qrImage: String? = null
+) {
+    val isPaid: Boolean get() = status == "paid"
+    val isPending: Boolean get() = status == "creating" || status == "awaiting_payment"
+}
+
 data class Order(
     val id: String,
     val orderNumber: String,

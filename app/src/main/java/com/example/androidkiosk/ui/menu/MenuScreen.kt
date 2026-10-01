@@ -15,6 +15,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -84,6 +87,7 @@ import android.content.res.Configuration
 import coil3.compose.AsyncImage
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import com.example.androidkiosk.R
@@ -149,9 +153,14 @@ fun MenuScreen(
     val submissionState by viewModel.submissionState.collectAsState()
     val authorizationState by viewModel.authorizationState.collectAsState()
     val isAuthorized = authorizationState.isAuthorized
+    val lifecycleNotice by viewModel.lifecycleNotice.collectAsState()
 
-    // Track UI mode — null means show the mode selection screen
-    var selectedUIMode by remember { mutableStateOf<UIMode?>(null) }
+    val deviceConfiguration = LocalConfiguration.current
+    val isTablet = MenuLayoutPolicy.isTablet(deviceConfiguration.smallestScreenWidthDp)
+    // Phones go straight to portrait. A fresh tablet visit asks for a layout.
+    var selectedUIMode by remember(isTablet) {
+        mutableStateOf(MenuLayoutPolicy.initialMode(deviceConfiguration.smallestScreenWidthDp))
+    }
 
     // The whole ordering flow as one stack rather than six independent booleans. Back used to
     // have nowhere to pop to, so it finished the Activity from every overlay and took the
@@ -184,16 +193,13 @@ fun MenuScreen(
     // Secret corner tap state: 5 taps in top-right corner within 3 seconds
     var cornerTapTimestamps by remember { mutableStateOf(listOf<Long>()) }
 
-    // Programmatically control screen orientation based on selected UI mode.
-    // The native menu is the ONLY surface that wants landscape; the two WebView surfaces
-    // (setup/registration and the PIN-unlocked admin panel) are portrait portals, which is
-    // also the manifest default (android:screenOrientation="portrait").
+    // Keep the tablet chooser wide enough for its three cards; registration and the
+    // embedded admin portal remain portrait, as does every phone ordering screen.
     val activity = LocalActivity.current
-    DisposableEffect(selectedUIMode) {
-        val orientation = if (selectedUIMode == UIMode.PORTRAIT)
-            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        else
+    DisposableEffect(selectedUIMode, isTablet, isAuthorized) {
+        val orientation = if (MenuLayoutPolicy.useLandscape(isTablet, isAuthorized, selectedUIMode))
             ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         activity?.requestedOrientation = orientation
         onDispose {
             // Leaving the native menu lands on a WebView surface, so hand the window back to
@@ -290,6 +296,9 @@ fun MenuScreen(
             Scaffold(
                 containerColor = Color.Transparent,
                 modifier = Modifier.fillMaxSize(),
+                topBar = {
+                    if (isAuthorized) com.example.androidkiosk.ui.menu.components.LifecycleNotice(lifecycleNotice)
+                },
                 bottomBar = {
                     if (isAuthorized && selectedUIMode != null && !isLoading && errorMessage == null) {
                         CartSummaryBar(
@@ -436,6 +445,7 @@ fun MenuScreen(
 
         (navState.top as? MenuNavigation.Stage.QrPayment)?.let { stage ->
             if (isAuthorized) {
+                LaunchedEffect(stage.order.id) { viewModel.startQrPayment(stage.order) }
                 QRPaymentOverlay(
                     order = stage.order,
                     isSubmitting = submissionState.isSubmitting,
@@ -443,16 +453,13 @@ fun MenuScreen(
                     // separately so the payment stage underneath stays intact.
                     isComplete = submissionState.isComplete,
                     errorMessage = submissionState.errorMessage,
-                    onPaid = {
-                        viewModel.submitOrder(
-                            stage.order,
-                            PaymentMethod.QR_CODE,
-                            PaymentStatus.CUSTOMER_REPORTED_PAID
-                        )
-                    },
+                    qrImage = submissionState.qrImage,
+                    paymentStatus = submissionState.paymentStatus,
+                    expiresAt = submissionState.expiresAt,
+                    onPaid = { viewModel.startQrPayment(stage.order) },
                     onDismiss = {
                         navState = MenuNavigation.dismissAll()
-                        viewModel.resetOrderFlow()
+                        viewModel.cancelQrPayment(stage.order.id)
                     }
                 )
             }
@@ -719,8 +726,11 @@ private fun PortraitMenuContent(
 
     // Calculate section start indices in the flat LazyColumn
     // Pattern per section: header (1) + item rows (ceil(items / 2)) + divider (1, except last)
-    val itemsPerRow = 2
-    val sectionStartIndices = remember(allCategories) {
+    val configuration = LocalConfiguration.current
+    val itemsPerRow = MenuLayoutPolicy.portraitColumns(
+        configuration.screenWidthDp, configuration.fontScale
+    )
+    val sectionStartIndices = remember(allCategories, itemsPerRow) {
         var runningIndex = 0
         allCategories.mapIndexed { index, cat ->
             val start = runningIndex
@@ -827,27 +837,14 @@ private fun PortraitMenuContent(
             allCategories.forEachIndexed { catIndex, category ->
                 // ── Category header: icon on top, label centered below ──
                 item(key = "header_$catIndex") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
+                    Text(
+                        text = category.categoryName,
+                        modifier = Modifier.fillMaxWidth()
                             .padding(top = if (catIndex == 0) 0.dp else 8.dp, bottom = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = categoryIcon(category.categoryName),
-                            contentDescription = null,
-                            tint = theme.accentColor,
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = category.categoryName,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = theme.primaryTextColor,
-                            textAlign = TextAlign.Center
-                        )
-                    }
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.primaryTextColor
+                    )
                 }
 
                 // ── Menu item cards in rows of `itemsPerRow` ────────────
@@ -866,6 +863,7 @@ private fun PortraitMenuContent(
                             MenuItemCard(
                                 item = item,
                                 modifier = Modifier.weight(1f),
+                                compactRow = itemsPerRow == 1,
                                 onClick = { onItemClick(item) }
                             )
                         }
@@ -1073,13 +1071,18 @@ private fun CartOverlay(
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth(if (isCartPortrait) 0.92f else 0.5f)
-                        .fillMaxHeight(if (isCartPortrait) 0.85f else 0.9f)
+                        .fillMaxHeight(
+                            if (!isCartPortrait) 0.9f
+                            else if (cartItems.size <= 2 && cartConfig.fontScale < 1.5f) 0.58f
+                            else 0.85f
+                        )
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
                     // No exterior drop shadow on the cart panel: it sat on a dark scrim, where a
                     // shadow around the outside edge read as a glow rather than elevation. The
                     // dimmed menu behind still provides the depth cue. Matches ItemDetailOverlay.
-                    elevation = 0.dp
+                    elevation = 0.dp,
+                    showFocusOutline = false
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Row(
@@ -1187,13 +1190,13 @@ private fun CartListItem(
     onUpdateQuantity: (CartItem, Int) -> Unit
 ) {
     val storageBucket = stringResource(R.string.google_storage_bucket)
-    // The row is a raised neumorphic card, matching the size chips in the item detail overlay.
-    // The flat surfaceOverlayColor it used before carried no depth at all, so the line, the
-    // controls and the thumbnail all read as one undifferentiated block.
+    // Plain cart rows keep the total and checkout action visually prominent.
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        elevation = 3.dp
+        backgroundColor = LocalBackgroundTheme.current.surfaceColor,
+        elevation = 0.dp,
+        showFocusOutline = false
     ) {
     Row(
         modifier = Modifier
@@ -1320,22 +1323,16 @@ private fun CartListItem(
                         }
                     }
 
-                    GlassCard(shape = CircleShape, elevation = 2.dp) {
-                        IconButton(
-                            onClick = { onRemove(cartItem) },
-                            modifier = Modifier.size(48.dp),
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Transparent,
-                                contentColor = Color.Red.copy(alpha = 0.7f)
-                            )
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "Remove ${cartItem.menuItem.name}",
-                                tint = Color.Red.copy(alpha = 0.7f),
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
+                    IconButton(
+                        onClick = { onRemove(cartItem) },
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Remove ${cartItem.menuItem.name}",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
                 }
             }
@@ -1353,10 +1350,12 @@ private fun CheckoutOverlay(
     onOrderConfirmed: (Order) -> Unit
 ) {
     val cartItems by viewModel.cartItems.collectAsState()
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .imePadding()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1376,9 +1375,15 @@ private fun CheckoutOverlay(
             modifier = Modifier
                 .align(Alignment.Center)
                 .fillMaxWidth(if (isCheckoutPortrait) 0.92f else 0.5f)
-                .fillMaxHeight(if (isCheckoutPortrait) 0.85f else 0.9f)
+                .fillMaxHeight(
+                    if (keyboardVisible) 0.95f
+                    else if (!isCheckoutPortrait) 0.9f
+                    else if (cartItems.size <= 2 && checkoutConfig.fontScale < 1.5f) 0.65f
+                    else 0.85f
+                )
                 .clickable(enabled = false) { },
             shape = RoundedCornerShape(16.dp),
+            showFocusOutline = false
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Row(

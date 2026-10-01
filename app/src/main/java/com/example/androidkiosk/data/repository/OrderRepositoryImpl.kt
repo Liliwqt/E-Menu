@@ -6,6 +6,7 @@ import com.example.androidkiosk.domain.repository.OrderRepository
 import com.example.androidkiosk.model.Order
 import com.example.androidkiosk.model.PaymentMethod
 import com.example.androidkiosk.model.PaymentStatus
+import com.example.androidkiosk.model.QrCheckoutSession
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.DataSnapshot
@@ -25,6 +26,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.long
 import kotlin.math.abs
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -38,8 +41,19 @@ class OrderRepositoryImpl @Inject constructor(
 
     private val _subscriptionEndAt = MutableStateFlow<Long?>(null)
     override val subscriptionEndAt: StateFlow<Long?> = _subscriptionEndAt.asStateFlow()
+    private val _lifecycleNotice = MutableStateFlow<String?>(null)
+    override val lifecycleNotice: StateFlow<String?> = _lifecycleNotice.asStateFlow()
+    private var billingBlocked = false
     private var entitlementRef: DatabaseReference? = null
     private var entitlementListener: ValueEventListener? = null
+    private var lifecycleRef: DatabaseReference? = null
+    private var lifecycleListener: ValueEventListener? = null
+    private var entitlementExpiry: Long? = null
+    private var lifecycleLoaded = false
+    private var lifecycleStatus: String? = null
+    private fun publishAccess() {
+        _subscriptionEndAt.value = effectiveOrderExpiry(entitlementExpiry, lifecycleStatus, lifecycleLoaded, billingBlocked)
+    }
     private var observationGeneration = 0
 
     override fun startSubscriptionObservation() {
@@ -51,13 +65,15 @@ class OrderRepositoryImpl @Inject constructor(
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (generation != observationGeneration) return
-                _subscriptionEndAt.value = if (
+                entitlementExpiry = if (
                     snapshot.child("subscriptionStatus").getValue(String::class.java) in listOf("trialing", "active")
                 ) snapshot.child("periodEndAt").getValue(Long::class.java) ?: 0L else 0L
+                publishAccess()
             }
             override fun onCancelled(error: DatabaseError) {
                 if (generation != observationGeneration) return
-                _subscriptionEndAt.value = 0L
+                entitlementExpiry = 0L
+                publishAccess()
                 Timber.e(error.toException(), "Unable to read branch subscription")
             }
         }
@@ -65,11 +81,41 @@ class OrderRepositoryImpl @Inject constructor(
         entitlementListener = listener
         _subscriptionEndAt.value = null
         reference.addValueEventListener(listener)
+        val lifecycle = database.getReference("${branchPathProvider.companyId}/branches/${branchPathProvider.branchId}/lifecycle")
+        val lifecycleObserver = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                if (generation != observationGeneration) return
+                lifecycleStatus = snapshot.child("status").getValue(String::class.java)
+                billingBlocked = snapshot.child("billingBlocked").getValue(Boolean::class.java) == true
+                _lifecycleNotice.value = lifecycleNoticeText(lifecycleStatus, snapshot.child("deleteAt").getValue(Long::class.java))
+                lifecycleLoaded = true
+                publishAccess()
+            }
+            override fun onCancelled(error: DatabaseError) {
+                if (generation != observationGeneration) return
+                lifecycleStatus = "unreadable"
+                _lifecycleNotice.value = "Branch access could not be checked. Ordering is paused; retry registration."
+                lifecycleLoaded = true
+                publishAccess()
+                Timber.e(error.toException(), "Unable to read branch lifecycle")
+            }
+        }
+        lifecycleRef = lifecycle
+        lifecycleListener = lifecycleObserver
+        lifecycle.addValueEventListener(lifecycleObserver)
     }
 
     override fun stopSubscriptionObservation() {
         observationGeneration++
         entitlementListener?.let { listener -> entitlementRef?.removeEventListener(listener) }
+        lifecycleListener?.let { listener -> lifecycleRef?.removeEventListener(listener) }
+        lifecycleListener = null
+        lifecycleRef = null
+        entitlementExpiry = null
+        lifecycleLoaded = false
+        lifecycleStatus = null
+        billingBlocked = false
+        _lifecycleNotice.value = null
         entitlementListener = null
         entitlementRef = null
         _subscriptionEndAt.value = null
@@ -77,6 +123,9 @@ class OrderRepositoryImpl @Inject constructor(
 
     override suspend fun submitOrder(order: Order): Result<Unit> {
         return try {
+            check(order.paymentMethod == PaymentMethod.COUNTER && order.paymentStatus == PaymentStatus.PAY_AT_COUNTER) {
+                "QR Ph orders must use the verified payment flow"
+            }
             validateOrder(order)
             check(authManager.authorizationState.value.isAuthorized) {
                 "This device is not registered"
@@ -129,7 +178,74 @@ class OrderRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun validateOrder(order: Order) {
+    override suspend fun startQrCheckout(order: Order): Result<QrCheckoutSession> = runCatching {
+        validateOrder(order, requirePaymentSelection = false)
+        val body = qrCheckoutRequestJson(order, branchPathProvider.companyId, branchPathProvider.branchId)
+        parseQrCheckout(paymentRequest("/api/payments/qrph/checkouts", "POST", body), order.id)
+    }
+
+    override suspend fun getQrCheckout(orderId: String): Result<QrCheckoutSession> = runCatching {
+        val company = branchPathProvider.companyId
+        val branch = branchPathProvider.branchId
+        parseQrCheckout(paymentRequest(
+            "/api/payments/qrph/checkouts/$orderId?companyId=$company&branchId=$branch", "GET"
+        ), orderId)
+    }
+
+    override suspend fun cancelQrCheckout(orderId: String): Result<Unit> = runCatching {
+        val company = branchPathProvider.companyId
+        val branch = branchPathProvider.branchId
+        paymentRequest(
+            "/api/payments/qrph/checkouts/$orderId/cancel?companyId=$company&branchId=$branch", "POST"
+        )
+        Unit
+    }
+
+    private suspend fun paymentRequest(path: String, method: String, body: String? = null) =
+        withContext(Dispatchers.IO) {
+            check(authManager.authorizationState.value.isAuthorized) { "This device is not registered" }
+            val token = authManager.idToken()
+            val connection = URL(BuildConfig.ORDER_API_URL.trimEnd('/') + path).openConnection() as HttpURLConnection
+            try {
+                connection.requestMethod = method
+                connection.connectTimeout = 10000
+                connection.readTimeout = 25000
+                connection.setRequestProperty("Authorization", "Bearer $token")
+                connection.setRequestProperty("Content-Type", "application/json")
+                if (body != null) {
+                    connection.doOutput = true
+                    connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                }
+                val status = connection.responseCode
+                val responseText = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (status !in 200..299) {
+                    val detail = runCatching {
+                        Json.parseToJsonElement(responseText).jsonObject["detail"]?.jsonPrimitive?.content
+                    }.getOrNull()
+                    error(detail ?: "Payment service unavailable ($status)")
+                }
+                Json.parseToJsonElement(responseText).jsonObject
+            } finally {
+                connection.disconnect()
+            }
+        }
+
+    private fun parseQrCheckout(result: kotlinx.serialization.json.JsonObject, expectedOrderId: String): QrCheckoutSession {
+        val orderId = result["orderId"]?.jsonPrimitive?.content
+            ?: error("Payment response omitted the order ID")
+        check(orderId == expectedOrderId) { "Payment confirmation did not match the order" }
+        return QrCheckoutSession(
+            orderId = orderId,
+            orderNumber = result["orderNumber"]?.jsonPrimitive?.content ?: orderId.take(8).uppercase(),
+            total = result["total"]?.jsonPrimitive?.double ?: error("Payment response omitted the total"),
+            status = result["status"]?.jsonPrimitive?.content ?: error("Payment response omitted the status"),
+            expiresAt = result["expiresAt"]?.jsonPrimitive?.long ?: 0L,
+            qrImage = result["qrImage"]?.jsonPrimitive?.content?.takeIf { it != "null" }
+        )
+    }
+
+    private fun validateOrder(order: Order, requirePaymentSelection: Boolean = true) {
         require(runCatching { UUID.fromString(order.id) }.isSuccess) { "Order ID must be a UUID" }
         require(order.orderNumber.matches(Regex("[A-F0-9]{8}"))) { "Invalid display order number" }
         require(order.orderNumber == order.id.take(8).uppercase()) { "Display order number does not match ID" }
@@ -141,14 +257,13 @@ class OrderRepositoryImpl @Inject constructor(
             "Invalid customer name"
         }
         require(order.items.isNotEmpty()) { "Order must contain at least one item" }
-        require(order.paymentMethod != null) { "Payment method is required" }
-        require(order.paymentStatus != null) { "Payment status is required" }
-        require(
-            (order.paymentMethod == PaymentMethod.QR_CODE &&
-                order.paymentStatus == PaymentStatus.CUSTOMER_REPORTED_PAID) ||
-                (order.paymentMethod == PaymentMethod.COUNTER &&
-                    order.paymentStatus == PaymentStatus.PAY_AT_COUNTER)
-        ) { "Payment method and status do not match" }
+        if (requirePaymentSelection) {
+            require(order.paymentMethod != null) { "Payment method is required" }
+            require(order.paymentStatus != null) { "Payment status is required" }
+            require(order.paymentMethod == PaymentMethod.COUNTER &&
+                order.paymentStatus == PaymentStatus.PAY_AT_COUNTER
+            ) { "Only Pay at Counter uses direct order submission" }
+        }
         require(order.items.all { item ->
             item.menuItem.id.isNotBlank() &&
                 item.menuItem.categoryName.isNotBlank() &&

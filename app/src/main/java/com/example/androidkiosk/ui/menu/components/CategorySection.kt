@@ -8,6 +8,8 @@ import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,6 +32,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import coil3.compose.AsyncImage
 import com.example.androidkiosk.R
 import com.example.androidkiosk.model.MenuItem
@@ -42,10 +46,12 @@ import java.util.Locale
 fun MenuItemCard(
     item: MenuItem,
     modifier: Modifier = Modifier,
+    compactRow: Boolean = false,
     onClick: () -> Unit
 ) {
     val storageBucket = stringResource(R.string.google_storage_bucket)
     val theme = LocalBackgroundTheme.current
+    val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -62,7 +68,7 @@ fun MenuItemCard(
 
     GlassCard(
         modifier = modifier
-            .aspectRatio(0.75f)
+            .then(if (compactRow) Modifier else Modifier.aspectRatio(if (isPortrait) 1.15f else 0.75f))
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -82,7 +88,33 @@ fun MenuItemCard(
         borderColor = if (isFocused) theme.primaryTextColor else Color.Transparent,
         elevation = 3.dp
     ) {
-        Column(
+        if (compactRow) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AsyncImage(
+                    model = ImageUrlValidator.sanitize(item.imageUrl.ifEmpty { null }, storageBucket)
+                        ?: R.drawable.menu_item_placeholder,
+                    contentDescription = null,
+                    modifier = Modifier.size(88.dp),
+                    contentScale = ContentScale.Crop,
+                    error = painterResource(R.drawable.menu_item_placeholder)
+                )
+                Column(
+                    modifier = Modifier.weight(1f).padding(start = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(item.name, style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold, maxLines = 2,
+                        overflow = TextOverflow.Ellipsis)
+                    Text("₱${String.format(Locale.getDefault(), "%.2f", item.price)}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold, color = theme.accentColor)
+                    if (!item.available) Text("Unavailable", color = theme.secondaryTextColor)
+                }
+            }
+        } else Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
@@ -96,7 +128,7 @@ fun MenuItemCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(0.dp)
-                    .weight(0.65f)
+                    .weight(0.45f)
                     .padding(8.dp),
                 contentScale = ContentScale.Crop,
                 error = painterResource(R.drawable.menu_item_placeholder)
@@ -105,7 +137,7 @@ fun MenuItemCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.35f)
+                    .weight(0.55f)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp)

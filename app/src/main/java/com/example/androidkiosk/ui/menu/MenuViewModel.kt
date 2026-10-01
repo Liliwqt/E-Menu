@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.UUID
@@ -31,7 +33,10 @@ data class OrderSubmissionState(
     val orderId: String? = null,
     val isSubmitting: Boolean = false,
     val isComplete: Boolean = false,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val qrImage: String? = null,
+    val paymentStatus: String? = null,
+    val expiresAt: Long = 0L
 )
 
 @HiltViewModel
@@ -44,6 +49,7 @@ class MenuViewModel @Inject constructor(
 
     val authorizationState: StateFlow<DeviceAuthorizationState> = authManager.authorizationState
     val subscriptionEndAt: StateFlow<Long?> = orderRepository.subscriptionEndAt
+    val lifecycleNotice: StateFlow<String?> = orderRepository.lifecycleNotice
 
     val categories: StateFlow<List<CategoryWithItems>> = menuRepository
         .observeCategories()
@@ -80,6 +86,7 @@ class MenuViewModel @Inject constructor(
     val cartItems: StateFlow<List<CartItem>> = _cartItems.asStateFlow()
 
     private val _submissionState = MutableStateFlow(OrderSubmissionState())
+    private var qrPollingJob: Job? = null
     val submissionState: StateFlow<OrderSubmissionState> = _submissionState.asStateFlow()
 
     init {
@@ -221,6 +228,13 @@ class MenuViewModel @Inject constructor(
     }
 
     fun submitOrder(order: Order, method: PaymentMethod, status: PaymentStatus) {
+        if (method != PaymentMethod.COUNTER || status != PaymentStatus.PAY_AT_COUNTER) {
+            _submissionState.value = OrderSubmissionState(
+                orderId = order.id,
+                errorMessage = "QR Ph orders must use the verified payment flow."
+            )
+            return
+        }
         if (!authorizationState.value.isAuthorized) {
             _submissionState.value = OrderSubmissionState(
                 orderId = order.id,
@@ -231,7 +245,7 @@ class MenuViewModel @Inject constructor(
         if ((subscriptionEndAt.value ?: 0L) <= System.currentTimeMillis()) {
             _submissionState.value = OrderSubmissionState(
                 orderId = order.id,
-                errorMessage = "Branch plan expired. Ordering is paused until the owner renews."
+                errorMessage = "Branch access is paused by expiry, cancellation or closure. Ask the owner to check Records and access."
             )
             return
         }
@@ -280,7 +294,81 @@ class MenuViewModel @Inject constructor(
         }
     }
 
+    fun startQrPayment(order: Order) {
+        if (_submissionState.value.isSubmitting || _submissionState.value.isComplete) return
+        if (!authorizationState.value.isAuthorized) {
+            _submissionState.value = OrderSubmissionState(orderId = order.id, errorMessage = "This device is not registered.")
+            return
+        }
+        if ((subscriptionEndAt.value ?: 0L) <= System.currentTimeMillis()) {
+            _submissionState.value = OrderSubmissionState(orderId = order.id, errorMessage = "Branch access is paused by expiry, cancellation or closure. Ask the owner to check Records and access.")
+            return
+        }
+        qrPollingJob?.cancel()
+        _submissionState.value = OrderSubmissionState(orderId = order.id, isSubmitting = true, paymentStatus = "creating")
+        qrPollingJob = viewModelScope.launch {
+            orderRepository.startQrCheckout(order)
+                .onSuccess { checkout ->
+                    applyQrCheckout(order, checkout)
+                    while (_submissionState.value.paymentStatus in setOf("creating", "awaiting_payment")) {
+                        delay(QR_POLL_INTERVAL_MS)
+                        val refresh = if (_submissionState.value.paymentStatus == "creating") {
+                            // Repeating create with the same order/attempt is provider-idempotent
+                            // and recovers a process interruption before the QR was stored.
+                            orderRepository.startQrCheckout(order)
+                        } else {
+                            orderRepository.getQrCheckout(order.id)
+                        }
+                        refresh.onSuccess { applyQrCheckout(order, it) }
+                            .onFailure { error ->
+                                Timber.w(error, "Unable to refresh QR payment %s", order.orderNumber)
+                            }
+                    }
+                }
+                .onFailure { error ->
+                    Timber.e(error, "Unable to start QR payment %s", order.orderNumber)
+                    _submissionState.value = OrderSubmissionState(
+                        orderId = order.id,
+                        errorMessage = error.message ?: "Verified QR Ph is unavailable. Use pay at counter."
+                    )
+                }
+        }
+    }
+
+    private fun applyQrCheckout(order: Order, checkout: com.example.androidkiosk.model.QrCheckoutSession) {
+        when {
+            checkout.isPaid -> {
+                clearCart()
+                _submissionState.value = OrderSubmissionState(
+                    orderId = order.id, isComplete = true, paymentStatus = "paid"
+                )
+            }
+            checkout.isPending -> {
+                _submissionState.value = OrderSubmissionState(
+                    orderId = order.id, qrImage = checkout.qrImage, paymentStatus = checkout.status,
+                    expiresAt = checkout.expiresAt
+                )
+            }
+            else -> _submissionState.value = OrderSubmissionState(
+                orderId = order.id, paymentStatus = checkout.status,
+                errorMessage = when (checkout.status) {
+                    "expired" -> "The QR code expired. No order was placed and reserved stock was released."
+                    "cancelled" -> "QR payment was cancelled. No order was placed."
+                    else -> "Payment was not completed. No order was placed; use pay at counter or try again."
+                }
+            )
+        }
+    }
+
+    fun cancelQrPayment(orderId: String) {
+        qrPollingJob?.cancel()
+        val shouldCancel = _submissionState.value.paymentStatus in setOf("creating", "awaiting_payment")
+        if (shouldCancel) viewModelScope.launch { orderRepository.cancelQrCheckout(orderId) }
+        _submissionState.value = OrderSubmissionState()
+    }
+
     fun resetOrderFlow() {
+        qrPollingJob?.cancel()
         _submissionState.value = OrderSubmissionState()
     }
 
@@ -293,5 +381,6 @@ class MenuViewModel @Inject constructor(
 
     private companion object {
         const val MAX_CUSTOMER_NAME_LENGTH = 80
+        const val QR_POLL_INTERVAL_MS = 2_000L
     }
 }

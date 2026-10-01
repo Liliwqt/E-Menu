@@ -119,6 +119,19 @@ fun DeviceWebView(
                         created.addJavascriptInterface(
                             DeviceWebBridge(
                                 onEnterMenuMode = onEnterMenuMode,
+                                onOpenRecords = { branchId ->
+                                    created.post {
+                                        val portal = android.net.Uri.parse(url)
+                                        val target = portal.buildUpon().path("/subscription/$branchId").clearQuery().fragment(null).build()
+                                        if (portal.scheme == "https") {
+                                            try {
+                                                context.startActivity(Intent(Intent.ACTION_VIEW, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                            } catch (_: ActivityNotFoundException) {
+                                                Toast.makeText(context, "Open the portal in your browser to download records.", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                },
                                 deviceUidProvider = {
                                     // Read the current anonymous Firebase UID at
                                     // call time so it's fresh after sign-in.

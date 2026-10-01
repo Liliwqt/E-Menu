@@ -122,6 +122,7 @@ fun GlassCard(
     elevation: Dp = 0.dp,
     useTonalSurface: Boolean = false,
     isPressed: Boolean = false,
+    showFocusOutline: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val theme = LocalBackgroundTheme.current
@@ -130,7 +131,7 @@ fun GlassCard(
     var isFocused by remember { mutableStateOf(false) }
     // Resting cards use paired shadows; keyboard focus retains a strong outline.
     val borderModifier = when {
-        isFocused -> Modifier.border(2.dp, theme.primaryTextColor, shape)
+        showFocusOutline && isFocused -> Modifier.border(2.dp, theme.primaryTextColor, shape)
         borderColor != Color.Unspecified -> Modifier.border(borderWidth, borderColor, shape)
         borderBrush != null -> Modifier.border(borderWidth, borderBrush, shape)
         else -> Modifier
@@ -148,15 +149,15 @@ fun GlassCard(
                 // raised state read as raised.
                 Box(
                     Modifier.matchParentSize()
-                        .offset(x = (-5).dp, y = (-5).dp)
-                        .blur(10.dp, BlurredEdgeTreatment.Unbounded)
+                        .offset(x = (-3).dp, y = (-3).dp)
+                        .blur(8.dp, BlurredEdgeTreatment.Unbounded)
                         .background(Color.White, shape)
                 )
                 Box(
                     Modifier.matchParentSize()
-                        .offset(x = 6.dp, y = 6.dp)
-                        .blur(12.dp, BlurredEdgeTreatment.Unbounded)
-                        .background(Color(0xFFAFB9C0), shape)
+                        .offset(x = 3.dp, y = 4.dp)
+                        .blur(9.dp, BlurredEdgeTreatment.Unbounded)
+                        .background(Color(0xFFBEC7CE), shape)
                 )
             }
             Box(

@@ -32,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -189,10 +190,11 @@ fun ItemDetailOverlay(
                     modifier = Modifier
                         .fillMaxWidth(if (isPortrait) 0.92f else 0.6f)
                         .widthIn(max = 560.dp)
-                        .fillMaxHeight(if (isPortrait) 0.8f else 0.92f)
+                        .fillMaxHeight(if (isPortrait) 0.72f else 0.92f)
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
-                    elevation = 0.dp
+                    elevation = 0.dp,
+                    showFocusOutline = false
                 ) {
                     Column(modifier = Modifier.fillMaxSize()) {
                         // ── Image section (shrinks on constrained screens) ──
@@ -310,6 +312,10 @@ fun ItemDetailOverlay(
                                                     quantity = 1
                                                 },
                                                 enabled = sizeAvailable,
+                                                leadingIcon = if (isSelected) {
+                                                    { Icon(Icons.Default.Check, contentDescription = null,
+                                                        modifier = Modifier.size(18.dp)) }
+                                                } else null,
                                                 label = {
                                                     val label = when {
                                                         !sizeAvailable -> "$sizeName — Sold out"

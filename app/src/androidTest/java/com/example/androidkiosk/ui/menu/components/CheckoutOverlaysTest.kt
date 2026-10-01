@@ -34,7 +34,7 @@ class CheckoutOverlaysTest {
     )
 
     @Test
-    fun qrRendersBundledMerchantCodeAndPaidActionIsSingleFire() {
+    fun qrRendersDynamicProviderCodeWithoutManualPaidAction() {
         var reports = 0
         composeRule.setContent {
             MaterialTheme {
@@ -42,15 +42,17 @@ class CheckoutOverlaysTest {
                     order = order,
                     isSubmitting = false,
                     isComplete = false,
+                    qrImage = "data:image/png;base64,cXJwaA==",
+                    paymentStatus = "awaiting_payment",
                     onPaid = { reports++ },
                     onDismiss = {}
                 )
             }
         }
 
-        composeRule.onNodeWithContentDescription("Merchant GCash QR code").assertExists()
-        composeRule.onNodeWithText("I'VE PAID").performClick().assertIsNotEnabled()
-        composeRule.runOnIdle { assertEquals(1, reports) }
+        composeRule.onNodeWithContentDescription("QR Ph code for order 8FB46CB1").assertExists()
+        composeRule.onNodeWithText("Waiting for verified payment…").assertExists()
+        composeRule.runOnIdle { assertEquals(0, reports) }
     }
 
     @Test
@@ -119,8 +121,8 @@ class CheckoutOverlaysTest {
             }
         }
 
-        composeRule.onNodeWithText("Unable to submit order").assertExists()
-        composeRule.onNodeWithText("TRY AGAIN").assertExists()
+        composeRule.onNodeWithText("QR payment unavailable").assertExists()
+        composeRule.onNodeWithText("Try again").assertExists()
     }
 
     @Test
@@ -173,7 +175,7 @@ class CheckoutOverlaysTest {
             }
         }
 
-        composeRule.onNodeWithText("Order Submitted").assertExists()
+        composeRule.onNodeWithText("Payment confirmed").assertExists()
         composeRule.onNodeWithText("Done / Next customer").assertExists()
 
         // The previous build auto-dismissed success after 1500 ms; wait past that to prove it no longer does.
@@ -263,7 +265,7 @@ class CheckoutOverlaysTest {
         }
 
         composeRule.onNodeWithText(
-            "Your payment was reported. Staff will verify your payment report before serving your order."
+            "PayMongo confirmed this QR Ph payment. Your order has been sent to the branch."
         ).assertExists()
     }
 

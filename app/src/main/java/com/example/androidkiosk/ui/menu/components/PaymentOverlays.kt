@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredHeight
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
@@ -56,19 +58,18 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import com.example.androidkiosk.R
 import com.example.androidkiosk.model.Order
 import com.example.androidkiosk.model.PaymentMethod
 import com.example.androidkiosk.ui.animation.MotionTokens
 import com.example.androidkiosk.ui.menu.CartPresentation
 import com.example.androidkiosk.ui.theme.LocalBackgroundTheme
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -138,12 +139,17 @@ fun PaymentMethodOverlay(
                 GlassCard(
                     modifier = Modifier
                         .fillMaxWidth(if (isPaymentPortrait) 0.92f else 0.55f)
-                        .fillMaxHeight(if (isPaymentPortrait) 0.82f else 0.85f)
+                        .fillMaxHeight(
+                            if (!isPaymentPortrait) 0.85f
+                            else if (paymentConfig.fontScale < 1.5f) 0.56f
+                            else 0.82f
+                        )
                         .clickable(enabled = false) { },
                     shape = MaterialTheme.shapes.extraLarge,
                     // No exterior drop shadow: on a dark scrim it reads as a glow rather
                     // than elevation. Matches the item detail and cart overlays.
-                    elevation = 0.dp
+                    elevation = 0.dp,
+                    showFocusOutline = false
                 ) {
                     Column(
                         modifier = Modifier
@@ -200,7 +206,43 @@ fun PaymentMethodOverlay(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Payment options with press scale animation
+                        // Full-width choices are easier to scan and tap in portrait.
+                        if (isPaymentPortrait) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().weight(1f)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                PaymentOptionCard(
+                                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                                    icon = Icons.Default.QrCode2,
+                                    title = "QR Ph payment",
+                                    subtitle = "Exact amount · GCash and supported bank apps",
+                                    accentColor = MaterialTheme.colorScheme.primary,
+                                    onClick = {
+                                        scope.launch {
+                                            isVisible = false
+                                            delay(250)
+                                            onMethodSelected(PaymentMethod.QR_CODE)
+                                        }
+                                    }
+                                )
+                                PaymentOptionCard(
+                                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                                    icon = Icons.Default.Storefront,
+                                    title = "Pay at Counter",
+                                    subtitle = "Pay with cash or card at the counter",
+                                    accentColor = MaterialTheme.colorScheme.tertiary,
+                                    onClick = {
+                                        scope.launch {
+                                            isVisible = false
+                                            delay(250)
+                                            onMethodSelected(PaymentMethod.COUNTER)
+                                        }
+                                    }
+                                )
+                            }
+                        } else {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -210,8 +252,8 @@ fun PaymentMethodOverlay(
                             PaymentOptionCard(
                                 modifier = Modifier.weight(1f),
                                 icon = Icons.Default.QrCode2,
-                                title = "GCash Payment",
-                                subtitle = "Scan the merchant QR\nwith the GCash app",
+                                title = "QR Ph payment",
+                                subtitle = "Exact amount · GCash and\nsupported bank apps",
                                 accentColor = MaterialTheme.colorScheme.primary,
                                 onClick = {
                                     scope.launch {
@@ -237,15 +279,9 @@ fun PaymentMethodOverlay(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        }
 
-                        Text(
-                            text = "Tap an option to proceed",
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = payTheme.secondaryTextColor
-                        )
+
                     }
                 }
             }
@@ -286,9 +322,26 @@ private fun PaymentOptionCard(
                 onClick = onClick
             ),
         shape = MaterialTheme.shapes.large,
-        elevation = 2.dp
+        backgroundColor = LocalBackgroundTheme.current.surfaceColor,
+        borderColor = LocalBackgroundTheme.current.outlineColor,
+        elevation = 0.dp
     ) {
-        Column(
+        if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT) {
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Icon(imageVector = icon, contentDescription = null,
+                    modifier = Modifier.size(36.dp), tint = accentColor)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold)
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                        color = LocalBackgroundTheme.current.secondaryTextColor)
+                }
+            }
+        } else Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(20.dp),
@@ -338,336 +391,119 @@ private fun PaymentOptionCard(
 // QR Code Payment Overlay
 // ─────────────────────────────────────────────────────────
 
-/** Static merchant-QR payment. Customer acknowledgement is not bank verification. */
+/** Dynamic QR Ph payment. Completion comes only from provider verification. */
 @Composable
 fun QRPaymentOverlay(
     order: Order,
     isSubmitting: Boolean,
     isComplete: Boolean,
     errorMessage: String? = null,
+    qrImage: String? = null,
+    paymentStatus: String? = null,
+    expiresAt: Long = 0L,
     onPaid: () -> Unit,
     onDismiss: () -> Unit
 ) {
     var isVisible by remember { mutableStateOf(false) }
-    var actionPending by remember(order.id) { mutableStateOf(false) }
     var donePending by remember(order.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-
+    val context = LocalContext.current
     LaunchedEffect(Unit) { isVisible = true }
-
-    LaunchedEffect(isSubmitting, isComplete, errorMessage) {
-        if (!isSubmitting && !isComplete && errorMessage != null) actionPending = false
-    }
-
-    // A completed order waits for the customer to press Done; system back must not dismiss it.
     BackHandler(enabled = isComplete) { }
 
-    fun reportPaidOnce() {
-        if (actionPending || isSubmitting || isComplete) return
-        actionPending = true
-        onPaid()
-    }
-
     fun animatedDismiss() {
-        scope.launch {
-            isVisible = false
-            delay(250)
-            onDismiss()
-        }
+        scope.launch { isVisible = false; delay(250); onDismiss() }
     }
+    fun doneOnce() { if (!donePending) { donePending = true; animatedDismiss() } }
 
-    fun doneOnce() {
-        if (donePending) return
-        donePending = true
-        animatedDismiss()
-    }
-
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        // Scrim
-        AnimatedVisibility(
-            visible = isVisible,
-            enter = fadeIn(animationSpec = tween(MotionTokens.DurationMedium1)),
-            exit = fadeOut(animationSpec = tween(MotionTokens.DurationMedium1))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { }
-                    )
-            )
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        AnimatedVisibility(visible = isVisible, enter = fadeIn(tween(MotionTokens.DurationMedium1)),
+            exit = fadeOut(tween(MotionTokens.DurationMedium1))) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { })
         }
-
-        // Content
-        AnimatedVisibility(
-            visible = isVisible,
-            enter = fadeIn(tween(MotionTokens.DurationMedium1, easing = MotionTokens.EasingEmphasizedDecelerate)) + scaleIn(
-                initialScale = 0.85f,
-                transformOrigin = TransformOrigin(0.5f, 0.5f),
-                animationSpec = tween(MotionTokens.DurationMedium2, easing = MotionTokens.EasingEmphasizedDecelerate)
-            ) + slideInVertically(
-                initialOffsetY = { it / 10 },
-                animationSpec = tween(MotionTokens.DurationMedium2, easing = MotionTokens.EasingEmphasizedDecelerate)
-            ),
-            exit = fadeOut(tween(MotionTokens.DurationMedium1)) + scaleOut(
-                targetScale = 0.85f,
-                transformOrigin = TransformOrigin(0.5f, 0.5f),
-                animationSpec = tween(MotionTokens.DurationMedium2, easing = MotionTokens.EasingEmphasizedAccelerate)
-            )
-        ) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                val qrConfig = LocalConfiguration.current
-                val isQrPortrait = qrConfig.orientation == Configuration.ORIENTATION_PORTRAIT
-                GlassCard(
-                    modifier = Modifier
-                        .fillMaxWidth(if (isQrPortrait) 0.92f else 0.55f)
-                        .fillMaxHeight(if (isQrPortrait) 0.82f else 0.85f)
-                        .clickable(enabled = false) { },
-                    shape = MaterialTheme.shapes.extraLarge,
-                    // No exterior drop shadow: on a dark scrim it reads as a glow rather
-                    // than elevation. Matches the item detail and cart overlays.
-                    elevation = 0.dp
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        // Header
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "GCash Payment",
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                            IconButton(
-                                onClick = { animatedDismiss() },
-                                enabled = !isSubmitting && !actionPending
-                            ) {
-                                Icon(Icons.Default.Close, contentDescription = "Close")
-                            }
+        AnimatedVisibility(visible = isVisible,
+            enter = fadeIn(tween(MotionTokens.DurationMedium1)) + scaleIn(initialScale = 0.9f),
+            exit = fadeOut(tween(MotionTokens.DurationMedium1)) + scaleOut(targetScale = 0.9f)) {
+            val portrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
+            val theme = LocalBackgroundTheme.current
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(if (portrait) 0.92f else 0.55f)
+                    .fillMaxHeight(if (portrait) 0.82f else 0.85f).clickable(enabled = false) { },
+                shape = MaterialTheme.shapes.extraLarge, elevation = 0.dp, showFocusOutline = false
+            ) {
+                Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("QR Ph payment", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                        IconButton(onClick = { animatedDismiss() }, enabled = !isSubmitting) {
+                            Icon(Icons.Default.Close, contentDescription = "Cancel QR payment")
                         }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        val qrTheme = LocalBackgroundTheme.current
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 16.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "Order #${order.orderNumber}",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = qrTheme.primaryTextColor
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        when {
-                            isComplete -> {
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth()
-                                        .verticalScroll(rememberScrollState()),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    Text(
-                                        text = "Order Submitted",
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFF2F6B45)
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text(
-                                        text = "Order #${order.orderNumber}",
-                                        style = MaterialTheme.typography.headlineSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = qrTheme.primaryTextColor
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = "Amount to Pay ${CartPresentation.formatPrice(order.total)}",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = qrTheme.accentColor
-                                    )
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text(
-                                        text = "Your payment was reported. Staff will verify your payment report before serving your order.",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        textAlign = TextAlign.Center,
-                                        color = qrTheme.secondaryTextColor
-                                    )
-                                    Spacer(modifier = Modifier.height(20.dp))
-                                    Button(
-                                        onClick = { doneOnce() },
-                                        modifier = Modifier
-                                            .fillMaxWidth(0.85f)
-                                            // requiredHeight, not height: this lives in a weighted
-                                            // Column that passes down a max height below the
-                                            // button's intrinsic one, and a plain height gets
-                                            // coerced to it. Keeping the Done control reachable
-                                            // after submitting matters more than centring it.
-                                            .requiredHeight(52.dp),
-                                        shape = MaterialTheme.shapes.large
-                                    ) {
-                                        Text("Done / Next customer", fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-
-                            isSubmitting -> {
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(48.dp),
-                                        color = qrTheme.accentColor
-                                    )
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text(
-                                        text = "Submitting your order...",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = qrTheme.secondaryTextColor
-                                    )
-                                }
-                            }
-
-                            errorMessage != null -> {
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    Text(
-                                        text = "Unable to submit order",
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = errorMessage,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        textAlign = TextAlign.Center,
-                                        color = qrTheme.secondaryTextColor
-                                    )
-                                    Spacer(modifier = Modifier.height(20.dp))
-                                    Button(
-                                        onClick = { reportPaidOnce() },
-                                        enabled = !actionPending
-                                    ) {
-                                        Text("TRY AGAIN")
-                                    }
-                                }
-                            }
-
-                            else -> {
-                                // spacedBy rather than Arrangement.Center: a centred
-                                // column that is taller than its slot overflows equally at BOTH
-                                // ends, so the caption and the trailing note collided with the
-                                // "Amount to Pay" block below the divider. Even spacing from
-                                // the top keeps the overflow one-sided, and the smaller QR box
-                                // plus tighter gaps keep it inside the slot outright.
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(190.dp)
-                                            .clip(MaterialTheme.shapes.large)
-                                            .border(
-                                                2.dp,
-                                                MaterialTheme.colorScheme.outlineVariant,
-                                                MaterialTheme.shapes.large
-                                            )
-                                            .background(Color.White)
-                                            .padding(8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Image(
-                                            painter = painterResource(R.drawable.merchant_qr),
-                                            contentDescription = "Merchant GCash QR code",
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Fit
-                                        )
-                                    }
-
-                                    Text(
-                                        text = "Scan with GCash and enter the amount shown below.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        textAlign = TextAlign.Center,
-                                        color = qrTheme.secondaryTextColor
-                                    )
-                                    Button(
-                                        onClick = { reportPaidOnce() },
-                                        modifier = Modifier
-                                            .fillMaxWidth(0.85f)
-                                            // Required, not cosmetic: this sits inside a weighted
-                                            // Column, which hands its children a max height smaller
-                                            // than their intrinsic one. A fixed height alone gets
-                                            // coerced to that max, so the button was squashed
-                                            // flat with its label half cut off. Required height
-                                            // wins over the incoming constraint.
-                                            .requiredHeight(52.dp),
-                                        shape = MaterialTheme.shapes.large,
-                                        enabled = !actionPending
-                                    ) {
-                                        Text(
-                                            text = "I'VE PAID",
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                    Text(
-                                        text = "This records your report; staff will verify the payment.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        textAlign = TextAlign.Center,
-                                        color = qrTheme.secondaryTextColor
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Total amount
-                        Text(
-                            text = "Amount to Pay",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = qrTheme.secondaryTextColor
-                        )
-                        Text(
-                            text = "₱${String.format(Locale.getDefault(), "%.2f", order.total)}",
-                            style = MaterialTheme.typography.headlineLarge,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = qrTheme.accentColor
-                        )
                     }
+                    Text("Order #${order.orderNumber}", style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold, color = theme.primaryTextColor)
+                    Spacer(Modifier.height(12.dp))
+                    when {
+                        isComplete -> Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Text("Payment confirmed", style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.ExtraBold, color = Color(0xFF2F6B45))
+                            Spacer(Modifier.height(10.dp))
+                            Text("Order #${order.orderNumber}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(8.dp))
+                            Text(CartPresentation.formatPrice(order.total), style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold, color = theme.accentColor)
+                            Spacer(Modifier.height(12.dp))
+                            Text("PayMongo confirmed this QR Ph payment. Your order has been sent to the branch.",
+                                textAlign = TextAlign.Center, color = theme.secondaryTextColor)
+                            Spacer(Modifier.height(20.dp))
+                            Button(onClick = { doneOnce() }, Modifier.fillMaxWidth(0.85f).requiredHeight(52.dp)) {
+                                Text("Done / Next customer", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        errorMessage != null -> Column(Modifier.weight(1f).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Text("QR payment unavailable", style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.height(8.dp))
+                            Text(errorMessage, textAlign = TextAlign.Center, color = theme.secondaryTextColor)
+                            Spacer(Modifier.height(20.dp))
+                            Button(onClick = onPaid, enabled = !isSubmitting) { Text("Try again") }
+                            Text("You can close this screen and choose Pay at Counter.",
+                                style = MaterialTheme.typography.bodySmall, color = theme.secondaryTextColor)
+                        }
+                        isSubmitting || qrImage == null -> Column(Modifier.weight(1f).fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            CircularProgressIndicator(Modifier.size(48.dp), color = theme.accentColor)
+                            Spacer(Modifier.height(16.dp))
+                            Text("Creating a secure, one-time QR Ph code…", color = theme.secondaryTextColor,
+                                textAlign = TextAlign.Center)
+                        }
+                        else -> Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Box(Modifier.size(220.dp).clip(MaterialTheme.shapes.large).background(Color.White).padding(8.dp),
+                                contentAlignment = Alignment.Center) {
+                                AsyncImage(model = qrImage, contentDescription = "QR Ph code for order ${order.orderNumber}",
+                                    modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                            }
+                            Text("Scan with GCash or any QR Ph-compatible banking app.", textAlign = TextAlign.Center,
+                                color = theme.secondaryTextColor)
+                            Text("Exact amount · one-time use · expires in 5 minutes", style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center, color = theme.secondaryTextColor)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                OutlinedButton(onClick = { scope.launch { saveQrImage(context, qrImage, order.orderNumber) } }) { Text("Save QR") }
+                                OutlinedButton(onClick = { scope.launch { shareQrImage(context, qrImage, order.orderNumber) } }) { Text("Share QR") }
+                            }
+                            Text(if (paymentStatus == "awaiting_payment") "Waiting for verified payment…" else "Preparing payment…",
+                                fontWeight = FontWeight.Bold, color = theme.primaryTextColor)
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Text("Amount to pay", color = theme.secondaryTextColor)
+                    Text(CartPresentation.formatPrice(order.total), style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.ExtraBold, color = theme.accentColor)
+                    if (expiresAt > 0L && !isComplete) Text("The order is created only after payment confirmation.",
+                        style = MaterialTheme.typography.bodySmall, color = theme.secondaryTextColor, textAlign = TextAlign.Center)
                 }
             }
         }
@@ -772,7 +608,8 @@ fun CounterPaymentOverlay(
                     shape = MaterialTheme.shapes.extraLarge,
                     // No exterior drop shadow: on a dark scrim it reads as a glow rather
                     // than elevation. Matches the item detail and cart overlays.
-                    elevation = 0.dp
+                    elevation = 0.dp,
+                    showFocusOutline = false
                 ) {
                     // Deliberately NOT scrollable. A scroll container here is what crashed the
                     // app: this body and the isComplete branch below both declared
