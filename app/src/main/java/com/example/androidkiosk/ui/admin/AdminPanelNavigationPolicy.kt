@@ -4,6 +4,35 @@ import java.net.URI
 
 /** Restricts top-level WebView navigation to the panel and Firebase services it requires. */
 object AdminPanelNavigationPolicy {
+    /** Signup alone goes to the browser; PayMongo never joins the WebView allowlist. */
+    fun isPayMongoSignupRequest(url: String, sourceUrl: String?, panelUrl: String,
+                               isMainFrame: Boolean, hasGesture: Boolean): Boolean {
+        if (!isMainFrame || !hasGesture || sourceUrl == null || url.length > 2048) return false
+        val source = runCatching { URI(sourceUrl) }.getOrNull() ?: return false
+        val panel = runCatching { URI(panelUrl) }.getOrNull() ?: return false
+        if (source.scheme != "https" || panel.scheme != "https" || source.host == null ||
+            !source.host.equals(panel.host, true) || source.rawUserInfo != null || panel.rawUserInfo != null ||
+            source.port !in listOf(-1, 443) || panel.port !in listOf(-1, 443) ||
+            !source.rawPath.orEmpty().matches(Regex("/payments/[a-z0-9][a-z0-9-]{0,119}"))) return false
+        val target = runCatching { URI(url) }.getOrNull() ?: return false
+        if (target.scheme != "https" || !target.host.orEmpty().equals("dashboard.paymongo.com", true) ||
+            target.port !in listOf(-1, 443) || target.rawUserInfo != null || target.rawFragment != null ||
+            target.rawPath != "/signup") return false
+        val fields = target.rawQuery?.split('&') ?: return false
+        if (fields.size != 2) return false
+        val pairs = fields.map { field ->
+            val parts = field.split('=', limit = 2)
+            if (parts.size != 2) return false
+            val value = runCatching { java.net.URLDecoder.decode(parts[1], "UTF-8") }.getOrNull() ?: return false
+            parts[0] to value
+        }
+        val query = pairs.toMap()
+        if (query.keys != setOf("email", "invitation_code")) return false
+        val email = query["email"].orEmpty()
+        return email.length <= 160 && email.matches(Regex("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) &&
+            query["invitation_code"].orEmpty().matches(Regex("lr_[A-Za-z0-9_-]{1,128}"))
+    }
+
     fun isSupportEmailRequest(url: String, sourceUrl: String?, panelUrl: String,
                               isMainFrame: Boolean, hasGesture: Boolean): Boolean {
         if (!isMainFrame || !hasGesture || sourceUrl == null || url.length > 8192) return false

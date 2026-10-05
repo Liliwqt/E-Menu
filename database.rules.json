@@ -75,6 +75,12 @@
         ".validate": "newData.hasChildren(['companyId', 'branchId', 'isActive']) && !newData.hasChild('kioskUid') && newData.child('companyId').val().matches(/^company-[a-z0-9-]+$/) && newData.child('branchId').val().matches(/^branch-[a-z0-9-]+$/) && newData.child('isActive').isBoolean()"
       }
     },
+    "paymentSandboxConnections": { ".read": false, ".write": false },
+    "paymentOnboardingEmails": { ".read": false, ".write": false },
+    "paymentAccountBindings": { ".read": false, ".write": false },
+    "paymentOnboardingEvents": { ".read": false, ".write": false },
+    "paymentOnboardingJobs": { ".read": false, ".write": false },
+    "paymentOnboardingConfig": { ".read": false, ".write": false },
     "paymentMerchantConnections": {
       "$companyId": {
         ".read": false,

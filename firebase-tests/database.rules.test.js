@@ -1354,6 +1354,11 @@ test('payment credentials and provider records are server-only', async () => {
     await assertFails(set(ref(db, 'paymentCheckoutSecrets/order-test'), { qrImage: 'secret' }));
     await assertFails(get(ref(db, `paymentRefunds/${companyId}/${branchId}/order-test`)));
     await assertFails(set(ref(db, 'paymentWebhookEvents/evt_test'), { receivedAt: Date.now() }));
+    for (const path of ['paymentSandboxConnections', 'paymentOnboardingEmails', 'paymentAccountBindings',
+      'paymentOnboardingJobs', 'paymentOnboardingEvents', 'paymentOnboardingConfig']) {
+      await assertFails(get(ref(db, `${path}/live/${companyId}`)));
+      await assertFails(set(ref(db, `${path}/live/${companyId}`), { status: 'ready' }));
+    }
   }
 });
 

@@ -6,6 +6,31 @@ import org.junit.Test
 
 class AdminPanelNavigationPolicyTest {
     private val panelUrl = "https://touch-menu-web.online"
+    private val signup = "https://dashboard.paymongo.com/signup?email=merchant%2Bshop%40example.test&invitation_code=lr_demo"
+
+    @Test fun `PayMongo signup needs trusted payment page and user gesture`() {
+        val source = "$panelUrl/payments/branch-demo"
+        assertTrue(AdminPanelNavigationPolicy.isPayMongoSignupRequest(signup, source, panelUrl, true, true))
+        assertTrue(AdminPanelNavigationPolicy.isPayMongoSignupRequest(signup, "$panelUrl/payments/main", panelUrl, true, true))
+        assertFalse(AdminPanelNavigationPolicy.isAllowed(signup, panelUrl))
+        assertFalse(AdminPanelNavigationPolicy.isPayMongoSignupRequest(signup, source, panelUrl, false, true))
+        assertFalse(AdminPanelNavigationPolicy.isPayMongoSignupRequest(signup, source, panelUrl, true, false))
+        for (untrusted in listOf(null, "http://touch-menu-web.online/payments/branch-demo", "$panelUrl/login",
+            "https://touch-menu-web.online:444/payments/branch-demo", "https://attacker@touch-menu-web.online/payments/branch-demo",
+            "https://untrusted.web.app/payments/branch-demo")) {
+            assertFalse(AdminPanelNavigationPolicy.isPayMongoSignupRequest(signup, untrusted, panelUrl, true, true))
+        }
+    }
+
+    @Test fun `PayMongo signup rejects unsafe hosts paths schemes and parameters`() {
+        for (url in listOf(signup.replace("https:", "http:"), signup.replace(".com/", ".com.evil/"),
+            signup.replace(".com/", ".com:444/"), signup.replace("dashboard", "user@dashboard"),
+            signup.replace("/signup", "/payments"), signup.replace("/signup", "/%73ignup"),
+            "$signup#fragment", "$signup&redirect=https://evil.test", "$signup&email=other%40example.test",
+            signup.replace("lr_demo", "org_demo"), signup.replace("%2B", "+"), signup.replace("%40", "%0A%40"))) {
+            assertFalse(url, AdminPanelNavigationPolicy.isPayMongoSignupRequest(url, "$panelUrl/payments/branch-demo", panelUrl, true, true))
+        }
+    }
 
     @Test
     fun `allows panel and Firebase endpoints over HTTPS`() {

@@ -255,6 +255,20 @@ internal fun configurePanelWebView(
     webView.webChromeClient = WebChromeClient()
     webView.webViewClient = object : WebViewClient() {
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+            if (AdminPanelNavigationPolicy.isPayMongoSignupRequest(
+                    request.url.toString(), view.url, panelUrl,
+                    request.isForMainFrame, request.hasGesture()
+                )) {
+                try {
+                    view.context.startActivity(Intent(Intent.ACTION_VIEW, request.url)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                } catch (_: ActivityNotFoundException) {
+                    Toast.makeText(view.context, "No browser found. Copy the invitation link and open it on another device.", Toast.LENGTH_LONG).show()
+                } catch (_: SecurityException) {
+                    Toast.makeText(view.context, "Could not open browser. Copy the invitation link to continue.", Toast.LENGTH_LONG).show()
+                }
+                return true
+            }
             if (AdminPanelNavigationPolicy.isSupportEmailRequest(
                     request.url.toString(), view.url, panelUrl,
                     request.isForMainFrame, request.hasGesture()
